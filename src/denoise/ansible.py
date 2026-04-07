@@ -1,0 +1,281 @@
+"""Ansible log pre-digestion: domain-specific noise removal.
+
+Ansible job logs are 70-90% noise — ok/skipping/changed lines, retry
+blocks, item loops, and embedded K8s API responses. This module strips
+all of it, preserving only error context and play structure.
+
+Three levels of compression:
+1. Line-level: strip noise lines (ok, skipping, changed, timestamps, etc.)
+2. Block-level: collapse retry blocks and item loops into summaries
+3. Blob-level: truncate large embedded data (K8s API responses, base64)
+"""
+
+import re
+from pathlib import Path
+from collections import Counter
+
+# ---------------------------------------------------------------------------
+# Level 1: Line-level classification
+# ---------------------------------------------------------------------------
+
+NOISE_PATTERNS = [
+    (re.compile(r"^ok: \["), "ok"),
+    (re.compile(r"^skipping: \["), "skipping"),
+    (re.compile(r"^changed: \["), "changed"),
+    (re.compile(r"^included: "), "included"),
+    (re.compile(r"^\w+day \d{2} \w+ \d{4}\s+\d{2}:\d{2}:\d{2}"), "timestamp"),
+    (re.compile(r"^Starting galaxy (role|collection) install"), "galaxy"),
+    (re.compile(r"^- (downloading|extracting|installing) role"), "galaxy"),
+    (re.compile(r"^Process install dependency map"), "galaxy"),
+    (re.compile(r"^(Starting|Rewriting) requirements"), "galaxy"),
+    (re.compile(r"^Vault password"), "vault"),
+    (re.compile(r"^\s*$"), "blank"),
+    (re.compile(r"^FAILED - RETRYING:"), "retry"),
+    (re.compile(r"^[\w_\- :]+ -{3,} \d+\.\d+s$"), "recap_timing"),
+    (re.compile(r"^\[DEPRECATION WARNING\]"), "deprecation"),
+    (re.compile(r"^This feature will be removed"), "deprecation"),
+    (re.compile(r"^\[WARNING\]:"), "warning"),
+    (re.compile(r"^\}$"), "json_close"),
+    (re.compile(r"^\{$"), "json_open"),
+    (re.compile(r"^\},?$"), "json_close"),
+    (re.compile(r'^"changed": (true|false),?$'), "json_frag"),
+    (re.compile(r'^"msg": "(All assertions passed|Pre-Workload tasks completed|Workload Tasks completed|Post-Workload Tasks completed|Step \d+)'), "json_success_msg"),
+    (re.compile(r'^"ansible_loop_var"'), "json_frag"),
+    (re.compile(r'^"status": "CREATE_COMPLETE"'), "json_frag"),
+    (re.compile(r'^"status_reason": null'), "json_frag"),
+    (re.compile(r'^"data": \{'), "json_frag"),
+    (re.compile(r'^"group_id":'), "json_frag"),
+    (re.compile(r"^skipping: no hosts matched"), "no_hosts"),
+    (re.compile(r"already installed in EE"), "galaxy_ee"),
+    (re.compile(r"^={10,}"), "separator"),
+    (re.compile(r"^NO MORE HOSTS LEFT"), "no_hosts"),
+    (re.compile(r"^TASKS RECAP"), "recap"),
+    (re.compile(r'^"msg": "Starting CSV: "'), "json_frag"),
+]
+
+SIGNAL_PATTERNS = [
+    (re.compile(r"^fatal: \["), "fatal"),
+    (re.compile(r"^FAILED!"), "failed"),
+    (re.compile(r"^ERROR"), "error"),
+    (re.compile(r"^PLAY \["), "play_header"),
+    (re.compile(r"^TASK \["), "task_header"),
+    (re.compile(r"^PLAY RECAP"), "play_recap"),
+    (re.compile(r"^    \"msg\":"), "error_msg"),
+    (re.compile(r"^    \"stderr\":"), "stderr"),
+    (re.compile(r"^    \"rc\":"), "return_code"),
+]
+
+
+def classify_line(line: str) -> str:
+    """Classify a single log line as noise, signal, or unknown."""
+    stripped = line.strip()
+    for pattern, label in NOISE_PATTERNS:
+        if pattern.search(stripped):
+            return f"noise:{label}"
+    for pattern, label in SIGNAL_PATTERNS:
+        if pattern.search(stripped):
+            return f"signal:{label}"
+    return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Level 2: Block-level dedup detection
+# ---------------------------------------------------------------------------
+
+def find_retry_blocks(lines: list[str]) -> list[dict]:
+    """Find consecutive retry lines and summarize them."""
+    blocks = []
+    i = 0
+    while i < len(lines):
+        if "FAILED - RETRYING:" in lines[i]:
+            start = i
+            m = re.search(r"RETRYING: \[.*?\]: (.+?) \(\d+ retries", lines[i])
+            task = m.group(1) if m else "unknown"
+            while i < len(lines) and "FAILED - RETRYING:" in lines[i]:
+                i += 1
+            blocks.append({
+                "start": start,
+                "end": i,
+                "count": i - start,
+                "task": task,
+            })
+        else:
+            i += 1
+    return blocks
+
+
+def find_repeated_ok_blocks(lines: list[str]) -> list[dict]:
+    """Find consecutive ok/changed lines for the same task across items."""
+    blocks = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if re.match(r"^(ok|changed): \[.+?\] => \(item=", stripped):
+            start = i
+            while i < len(lines) and re.match(
+                r"^(ok|changed): \[.+?\] => \(item=", lines[i].strip()
+            ):
+                i += 1
+            if i - start >= 3:
+                blocks.append({
+                    "start": start,
+                    "end": i,
+                    "count": i - start,
+                    "type": "item_loop",
+                })
+        else:
+            i += 1
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# Level 3: Large embedded data detection
+# ---------------------------------------------------------------------------
+
+def find_large_json_blobs(lines: list[str], min_chars: int = 500) -> list[dict]:
+    """Find lines containing large JSON/dict blobs."""
+    blobs = []
+    for i, line in enumerate(lines):
+        if len(line) > min_chars and (
+            "'metadata':" in line
+            or '"metadata":' in line
+            or "'spec':" in line
+            or '"spec":' in line
+            or "fieldsV1" in line
+        ):
+            blobs.append({"line": i, "length": len(line), "type": "k8s_api_response"})
+        elif len(line) > min_chars and ("REDACTED" in line or "Base64" in line):
+            blobs.append({"line": i, "length": len(line), "type": "redacted_secret"})
+        elif len(line) > min_chars:
+            blobs.append({"line": i, "length": len(line), "type": "long_line"})
+    return blobs
+
+
+# ---------------------------------------------------------------------------
+# Pre-digestion (all levels combined)
+# ---------------------------------------------------------------------------
+
+def predigest(text: str) -> str:
+    """Apply all three levels of Ansible log pre-digestion.
+
+    Returns the compressed log text.
+    """
+    lines = text.splitlines()
+
+    # Pre-scan: find which lines are near errors (keep those TASK headers)
+    error_lines: set[int] = set()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if (stripped.startswith("fatal:") or stripped.startswith("FAILED!")
+                or stripped.startswith("failed:") or "UNREACHABLE!" in stripped):
+            for j in range(max(0, i - 5), min(len(lines), i + 3)):
+                error_lines.add(j)
+
+    output = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Level 2: Collapse retry blocks
+        if "FAILED - RETRYING:" in stripped:
+            m = re.search(r"RETRYING: \[(.+?)\]: (.+?) \((\d+) retries", stripped)
+            host = m.group(1) if m else "?"
+            task = m.group(2) if m else "?"
+            count = 0
+            while i < len(lines) and "FAILED - RETRYING:" in lines[i]:
+                count += 1
+                i += 1
+            succeeded = i < len(lines) and lines[i].strip().startswith("ok:")
+            status = "then succeeded" if succeeded else "still failing"
+            output.append(f"[RETRY: {task} on {host}, {count} retries, {status}]")
+            continue
+
+        # Level 2: Collapse item loops
+        if re.match(r"^(ok|changed): \[.+?\] => \(item=", stripped):
+            action = "ok" if stripped.startswith("ok:") else "changed"
+            count = 0
+            while i < len(lines) and re.match(
+                r"^(ok|changed): \[.+?\] => \(item=", lines[i].strip()
+            ):
+                count += 1
+                i += 1
+            if count >= 3:
+                output.append(f"[{action}: {count} items processed]")
+                continue
+            else:
+                i -= count
+
+        cls = classify_line(line)
+
+        # Level 1: Strip pure noise
+        if cls.startswith("noise:"):
+            i += 1
+            continue
+
+        # Level 1: Strip TASK headers not near errors
+        if cls == "signal:task_header" and i not in error_lines:
+            i += 1
+            continue
+
+        # Level 3: Truncate huge K8s API responses
+        if len(line) > 500 and (
+            "'metadata':" in line or '"metadata":' in line or "fieldsV1" in line
+        ):
+            m = re.search(r"'kind': '(\w+)'", line) or re.search(r'"kind": "(\w+)"', line)
+            kind = m.group(1) if m else "resource"
+            m = re.search(r"'name': '([\w-]+)'", line) or re.search(r'"name": "([\w-]+)"', line)
+            name = m.group(1) if m else "?"
+            m = re.search(r"'namespace': '([\w-]+)'", line) or re.search(r'"namespace": "([\w-]+)"', line)
+            ns = m.group(1) if m else "?"
+            output.append(f"[K8S API RESPONSE: {kind}/{name} in {ns} — full response omitted]")
+            i += 1
+            continue
+
+        output.append(line)
+        i += 1
+
+    return "\n".join(output)
+
+
+def predigest_file(filepath: Path) -> str:
+    """Pre-digest a single Ansible log file."""
+    text = filepath.read_text(errors="replace")
+    return predigest(text)
+
+
+def analyze_log(filepath: Path) -> dict:
+    """Analyze a single log file and return statistics."""
+    lines = filepath.read_text(errors="replace").splitlines()
+    total = len(lines)
+
+    classifications: Counter[str] = Counter()
+    for line in lines:
+        classifications[classify_line(line)] += 1
+
+    retry_blocks = find_retry_blocks(lines)
+    item_blocks = find_repeated_ok_blocks(lines)
+    json_blobs = find_large_json_blobs(lines)
+
+    noise_count = sum(v for k, v in classifications.items() if k.startswith("noise:"))
+    signal_count = sum(v for k, v in classifications.items() if k.startswith("signal:"))
+    total_chars = sum(len(line) for line in lines)
+    blob_chars = sum(b["length"] for b in json_blobs)
+
+    return {
+        "file": filepath.name,
+        "total_lines": total,
+        "total_chars": total_chars,
+        "noise_lines": noise_count,
+        "signal_lines": signal_count,
+        "unknown_lines": classifications.get("unknown", 0),
+        "noise_pct": round(noise_count / total * 100, 1) if total > 0 else 0,
+        "retry_blocks": len(retry_blocks),
+        "retry_lines": sum(b["count"] for b in retry_blocks),
+        "item_loop_blocks": len(item_blocks),
+        "item_loop_lines": sum(b["count"] for b in item_blocks),
+        "json_blobs": len(json_blobs),
+        "json_blob_chars": blob_chars,
+        "json_blob_pct": round(blob_chars / total_chars * 100, 1) if total_chars > 0 else 0,
+    }
