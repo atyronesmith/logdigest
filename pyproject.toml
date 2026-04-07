@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "denoise"
+version = "0.1.0"
+description = "Task-aware pre-digestion for RAG and LLM pipelines"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+rag = ["numpy"]
+benchmarks = ["numpy", "datasets"]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/denoise"]
