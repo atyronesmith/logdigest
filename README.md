@@ -5,7 +5,8 @@ Task-aware pre-digestion for RAG and LLM pipelines. Removes low-entropy content 
 ## Features
 
 - **General-purpose cleaning:** cross-document boilerplate detection, MD5 deduplication, separator line removal, whitespace normalization
-- **Domain-specific modules:** Ansible log compression (line classification, retry/ok-block collapsing, large JSON truncation)
+- **Domain-specific modules:** Ansible logs, OpenShift must-gather, CI/CD logs (GitHub Actions/Jenkins/GitLab CI), systemd journal — all with line classification, block collapsing, and blob truncation
+- **Entropy pre-flight:** predict whether a corpus will benefit from pre-digestion before building anything
 - **Safety guard optimization:** tiered classification (keyword scan → logistic regression → LLM escalation) that eliminates most LLM guard calls on software engineering content
 - **Zero runtime dependencies** — pure Python 3.11+
 
@@ -33,12 +34,31 @@ boilerplate = build_boilerplate_set(docs)
 unique_docs = dedup_documents(docs)
 ```
 
-For Ansible logs:
+For domain-specific logs:
 
 ```python
 from denoise.ansible import predigest
-
 compressed = predigest(ansible_log_text)
+
+from denoise.mustgather import predigest, predigest_bundle
+compressed = predigest(pod_log_text)
+bundle = predigest_bundle(Path("must-gather-dir/"))  # walks entire bundle
+
+from denoise.cicd import predigest, detect_ci_system
+compressed = predigest(github_actions_log)  # auto-detects CI system
+
+from denoise.journald import predigest
+compressed = predigest(journalctl_output)
+```
+
+Entropy pre-flight (should I build a module for this corpus?):
+
+```python
+from denoise import corpus_entropy
+
+result = corpus_entropy(my_documents)
+# result["predicted_impact"]  → "high" / "medium" / "low" / "none"
+# result["recommendation"]    → human-readable guidance
 ```
 
 For safety guard pre-digestion:

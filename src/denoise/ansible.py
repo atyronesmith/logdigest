@@ -12,7 +12,12 @@ Three levels of compression:
 
 import re
 from pathlib import Path
-from collections import Counter
+
+from denoise.domain_base import (
+    classify_line as _classify_line,
+    analyze_file as _analyze_file,
+    find_large_blobs,
+)
 
 # ---------------------------------------------------------------------------
 # Level 1: Line-level classification
@@ -68,14 +73,7 @@ SIGNAL_PATTERNS = [
 
 def classify_line(line: str) -> str:
     """Classify a single log line as noise, signal, or unknown."""
-    stripped = line.strip()
-    for pattern, label in NOISE_PATTERNS:
-        if pattern.search(stripped):
-            return f"noise:{label}"
-    for pattern, label in SIGNAL_PATTERNS:
-        if pattern.search(stripped):
-            return f"signal:{label}"
-    return "unknown"
+    return _classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
 
 
 # ---------------------------------------------------------------------------
@@ -247,30 +245,19 @@ def predigest_file(filepath: Path) -> str:
 
 def analyze_log(filepath: Path) -> dict:
     """Analyze a single log file and return statistics."""
+    # Base stats from shared machinery
+    stats = _analyze_file(filepath, NOISE_PATTERNS, SIGNAL_PATTERNS)
+
+    # Domain-specific block/blob analysis
     lines = filepath.read_text(errors="replace").splitlines()
-    total = len(lines)
-
-    classifications: Counter[str] = Counter()
-    for line in lines:
-        classifications[classify_line(line)] += 1
-
     retry_blocks = find_retry_blocks(lines)
     item_blocks = find_repeated_ok_blocks(lines)
     json_blobs = find_large_json_blobs(lines)
 
-    noise_count = sum(v for k, v in classifications.items() if k.startswith("noise:"))
-    signal_count = sum(v for k, v in classifications.items() if k.startswith("signal:"))
-    total_chars = sum(len(line) for line in lines)
+    total_chars = stats.get("total_chars", sum(len(line) for line in lines))
     blob_chars = sum(b["length"] for b in json_blobs)
 
-    return {
-        "file": filepath.name,
-        "total_lines": total,
-        "total_chars": total_chars,
-        "noise_lines": noise_count,
-        "signal_lines": signal_count,
-        "unknown_lines": classifications.get("unknown", 0),
-        "noise_pct": round(noise_count / total * 100, 1) if total > 0 else 0,
+    stats.update({
         "retry_blocks": len(retry_blocks),
         "retry_lines": sum(b["count"] for b in retry_blocks),
         "item_loop_blocks": len(item_blocks),
@@ -278,4 +265,7 @@ def analyze_log(filepath: Path) -> dict:
         "json_blobs": len(json_blobs),
         "json_blob_chars": blob_chars,
         "json_blob_pct": round(blob_chars / total_chars * 100, 1) if total_chars > 0 else 0,
-    }
+    })
+    # Remove classifications detail (not in original API)
+    stats.pop("classifications", None)
+    return stats

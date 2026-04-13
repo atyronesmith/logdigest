@@ -91,11 +91,32 @@ Pre-digestion helps where noise exists and is a harmless no-op on clean data —
 
 ### Three-level approach (domain-specific modules)
 
-Using the Ansible module as an example:
+All domain modules follow the same architecture, with domain-specific patterns:
 
-- **Level 1 (line-level)** — Classify each line as noise/signal/unknown via regex. Strip noise lines (status messages, timestamps, progress indicators) while preserving signal (errors, failures, play structure).
-- **Level 2 (block-level)** — Deduplicate repeated patterns (retry loops, item iterations) into compact descriptors like `[RETRY: task on host, 5 retries, then succeeded]`.
-- **Level 3 (blob-level)** — Compress known verbose structures (K8s API responses, large JSON blobs) into one-line summaries.
+- **Level 1 (line-level)** — Classify each line as noise/signal/unknown via regex. Strip noise lines while preserving signal (errors, failures, structure).
+- **Level 2 (block-level)** — Deduplicate repeated patterns into compact descriptors (e.g., `[RETRY: task, 5 retries, then succeeded]`, `[HEALTH CHECKS: 200 lines, all OK]`).
+- **Level 3 (blob-level)** — Compress known verbose structures into one-line summaries.
+
+| Module | Domain | Noise Patterns | Signal Patterns | Block Detectors | Key Feature |
+|--------|--------|---------------|----------------|-----------------|-------------|
+| `ansible.py` | Ansible job logs | 54 | 9 | retry blocks, item loops | K8s API blob truncation |
+| `mustgather.py` | OpenShift must-gather | 40+ | 20+ | health checks, leader election, managedFields | `predigest_bundle()` for directory walking |
+| `cicd.py` | GitHub Actions / Jenkins / GitLab CI | 60+ | 20+ | dependency installs, container pulls | `detect_ci_system()` auto-detection |
+| `journald.py` | systemd journal | 35+ | 25+ | service restart loops, audit bursts | stack trace truncation, timestamp normalization |
+
+Shared machinery (`domain_base.py`) provides `classify_line()`, `analyze_lines()`, and `find_large_blobs()` so new domain modules only define their pattern lists and domain-specific detectors.
+
+### Entropy pre-flight
+
+Before investing in a new domain module, run the entropy diagnostic:
+
+```python
+from denoise import corpus_entropy
+result = corpus_entropy(documents)
+# predicted_impact: "high" (>60% redundancy) / "medium" / "low" / "none"
+```
+
+Impact is inversely proportional to document entropy. If `predicted_impact` is "none", skip it.
 
 ### Corpus-level approach (core module)
 

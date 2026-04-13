@@ -12,9 +12,11 @@ from denoise.core import (
     is_separator_line,
     predigest_document,
 )
+from denoise.entropy import corpus_entropy
 
 __all__ = [
     "build_boilerplate_set",
+    "corpus_entropy",
     "dedup_documents",
     "is_separator_line",
     "predigest_document",
