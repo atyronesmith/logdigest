@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/atyronesmith/denoise.git
+git clone https://github.com/atyronesmith/denoise.git  # update URL if forking
 cd denoise
 uv pip install -e ".[dev]"
 ```
