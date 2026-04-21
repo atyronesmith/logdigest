@@ -195,9 +195,9 @@ denoise/
 
 **Goal:** Detect when log formats have changed enough that patterns are stale, and trigger re-derivation automatically.
 
-### Runtime Monitoring
+### Continuous Monitoring: unknown_pct (free)
 
-During pre-digestion, track classification statistics per session:
+During pre-digestion, track classification statistics. This costs nothing — it's a counter increment on every `classify_line()` call that's already happening.
 
 ```python
 @dataclass
@@ -209,56 +209,75 @@ class DigestStats:
     unknown_pct: float = 0.0
 ```
 
-The key metric is `unknown_pct` — the fraction of lines that match neither noise nor signal patterns. This is the canary:
+`unknown_pct` — the fraction of lines matching neither noise nor signal patterns — is the primary drift signal:
 
-- **Baseline** (healthy patterns): unknown_pct ~5-15% (some lines are genuinely ambiguous)
+- **Healthy patterns**: unknown_pct ~5-15% (some lines are genuinely ambiguous)
 - **Stale patterns**: unknown_pct rises as new log format lines go unclassified
 - **Major version change**: unknown_pct spikes — many new patterns the classifier hasn't seen
 
-### Logprob-Based Drift Detection
+Denoise buffers unclassified lines in a rolling window. When `unknown_pct` crosses the threshold (default 0.25), it triggers the escalation path.
 
-Extends drift's entropy probing to the pattern generation problem. The specific operation:
+### Escalation: Logprob Confirmation (expensive, on-demand only)
 
-1. **At pattern generation time**, run `drift probe` on a sample of pre-digested logs. For each log, the LLM generates a summary; `drift probe` records per-token logprobs. Aggregate into a baseline distribution: the histogram of mean-token-entropy values across the sample. This captures how "surprised" the LLM is by pre-digested content when patterns are fresh.
+`unknown_pct` catches syntactic drift — new line formats the patterns don't match. But it misses semantic drift: patterns still match, but the content they're stripping has changed in ways that hurt downstream quality. For example, Ansible 2.17 might use the same `ok: [host]` format but restructure task output so that stripping `ok:` lines now removes context the LLM needs.
 
-2. **At runtime** (configurable interval, e.g., every 1000 logs), sample a batch of recently pre-digested logs and run the same probe. Compute the same mean-token-entropy histogram.
+Logprob probing detects this — but it requires running an LLM over sampled logs and capturing per-token logprobs, which has real inference cost. Running it continuously as parallel monitoring is not worth the overhead. Instead, it runs only as a confirmation step after `unknown_pct` triggers.
 
-3. **Compare the two histograms via JSD.** Jensen-Shannon divergence measures how much the runtime entropy distribution has shifted from baseline. High JSD means the LLM is seeing systematically different content after pre-digestion than it saw when patterns were generated.
-
-4. **If JSD exceeds threshold** → the pre-digested output has changed character, even if classification rates look stable. Trigger re-derivation.
-
-This catches a failure mode that `unknown_pct` misses: patterns still match syntactically, but the semantic content they're stripping has changed. For example, Ansible 2.17 might use the same `ok: [host]` format but restructure task output so that stripping `ok:` lines now removes context the LLM needs. The LLM's rising surprise (higher token entropy on the pre-digested output) surfaces this before downstream quality degrades.
-
-### Re-derivation Trigger
-
-When drift is detected:
+**The escalation flow:**
 
 ```
-┌─────────────────┐
-│ unknown_pct > T │──or──▶ Collect unclassified lines
-│ JSD > threshold │        from recent buffer
-└─────────────────┘               │
-                                  ▼
-                    ┌──────────────────────────┐
-                    │ drift discover <buffer>  │
-                    │   --domain <detected>    │
-                    │   --base <current.json>  │
-                    └──────────┬───────────────┘
-                               │
-                    ┌──────────▼───────────────┐
-                    │ Merge: new patterns +    │
-                    │ existing validated ones   │
-                    └──────────┬───────────────┘
-                               │
-                    ┌──────────▼───────────────┐
-                    │ Validate merged set      │
-                    │ against recent corpus     │
-                    └──────────┬───────────────┘
-                               │
-                    ┌──────────▼───────────────┐
-                    │ Hot-reload patterns.json  │
-                    │ (no restart needed)       │
-                    └──────────────────────────┘
+unknown_pct crosses threshold
+        │
+        ▼
+Collect buffered unclassified lines
+        │
+        ▼
+Run drift probe on N sampled pre-digested logs (N=20-50)
+        │
+        ▼
+Compare against baseline → confirm or dismiss
+```
+
+**What the baseline is, specifically:** At pattern generation time (`drift discover`), run `drift probe` on 50 pre-digested logs from the training corpus. For each log, the LLM generates a structured summary (the same task the patterns are optimizing for). `drift probe` records per-token logprobs on the LLM's output. Compute the mean token entropy per log (average of `-log2(p)` across all output tokens). The baseline is the distribution of these 50 mean-entropy values — stored as a histogram in the pattern set's JSON alongside the patterns themselves.
+
+**What the confirmation probe measures:** Run the same `drift probe` on 20-50 recently pre-digested logs. Compute the same per-log mean token entropy. Compare the two distributions via JSD.
+
+- **Low JSD** (< 0.10): the LLM is equally "surprised" by current pre-digested content as it was at training time. The `unknown_pct` spike is probably benign — new log lines that are genuinely ambiguous but not hurting quality. Buffer them for the next scheduled re-derivation but don't trigger an urgent one.
+- **High JSD** (> 0.15): the LLM is systematically more surprised. Pre-digestion is stripping content the LLM now needs, or passing through noise it shouldn't. Trigger re-derivation.
+
+This keeps continuous monitoring free (counters only) and pays the LLM inference cost only when there's already evidence of a problem.
+
+### Re-derivation
+
+When triggered (unknown_pct threshold crossed + logprob confirmation):
+
+```
+┌──────────────────────────────┐
+│ Collect unclassified lines   │
+│ from rolling buffer          │
+└──────────┬───────────────────┘
+           ▼
+┌──────────────────────────────┐
+│ drift discover <buffer>      │
+│   --domain <detected>        │
+│   --base <current.json>      │
+└──────────┬───────────────────┘
+           ▼
+┌──────────────────────────────┐
+│ Merge: new patterns +        │
+│ existing validated ones       │
+└──────────┬───────────────────┘
+           ▼
+┌──────────────────────────────┐
+│ Validate merged set against  │
+│ recent corpus (held-out)     │
+└──────────┬───────────────────┘
+           ▼
+┌──────────────────────────────┐
+│ Hot-reload patterns.json     │
+│ Reset unknown_pct baseline   │
+│ Store new logprob baseline   │
+└──────────────────────────────┘
 ```
 
 ### Configuration
@@ -268,27 +287,29 @@ from denoise import PatternManager
 
 manager = PatternManager(
     patterns_dir="patterns/",
-    unknown_threshold=0.25,       # trigger if >25% lines unclassified
-    jsd_threshold=0.15,           # trigger if logprob distribution shifted
-    buffer_size=1000,             # lines to collect before checking
+    unknown_threshold=0.25,       # unknown_pct trigger level
+    buffer_size=5000,             # unclassified lines to retain
     auto_rediscover=False,        # True = run drift discover automatically
-    drift_probe_interval=1000,    # logs between logprob checks
+    # Logprob escalation (only runs after unknown_pct trigger)
+    probe_sample_size=30,         # logs to probe for confirmation
+    jsd_confirm_threshold=0.15,   # JSD above this = confirmed drift
+    jsd_dismiss_threshold=0.10,   # JSD below this = benign, defer
 )
 ```
 
 ### What denoise owns vs. what drift owns
 
-| Concern | Owner |
-|---------|-------|
-| Runtime line classification stats | denoise |
-| Unknown line buffering | denoise |
-| Drift detection (unknown_pct threshold) | denoise |
-| Pattern set loading and hot-reload | denoise |
-| Domain/version classification | denoise |
-| `drift discover` (corpus → patterns) | drift |
-| `drift probe` (logprob analysis) | drift |
-| JSD comparison against baseline | drift |
-| Pattern validation against held-out corpus | drift |
+| Concern | Owner | Cost |
+|---------|-------|------|
+| Runtime classification counters | denoise | Free (per-line increment) |
+| unknown_pct threshold check | denoise | Free (division on check interval) |
+| Unclassified line buffering | denoise | Memory only (rolling window) |
+| Pattern set loading and hot-reload | denoise | Startup + on trigger |
+| Domain/version classification | denoise | Free (keyword scoring) |
+| `drift discover` (corpus → patterns) | drift | CPU (Drain3 + regex gen) |
+| `drift probe` (logprob confirmation) | drift | LLM inference (on-demand only) |
+| JSD comparison against baseline | drift | Negligible (histogram math) |
+| Pattern validation against held-out corpus | drift | CPU (regex matching) |
 
 ## Implementation Order
 
@@ -297,8 +318,8 @@ manager = PatternManager(
 3. **Phase 1c** — Re-derive current hand-authored patterns via the pipeline, proving the loop works
 4. **Phase 2a** — Version detection in `classify_log()`
 5. **Phase 2b** — Version-specific pattern sets (start with Ansible 2.14 vs 2.16)
-6. **Phase 3a** — Runtime `DigestStats` + unknown_pct monitoring
-7. **Phase 3b** — Logprob-based drift detection via `drift probe`
-8. **Phase 3c** — Auto re-derivation trigger
+6. **Phase 3a** — Runtime `DigestStats` + unknown_pct monitoring + unclassified line buffering
+7. **Phase 3b** — Logprob escalation path (on-demand `drift probe` after unknown_pct trigger)
+8. **Phase 3c** — Auto re-derivation with hot-reload
 
-Each phase is independently useful. Phase 1 alone answers the reviewer's provenance question. Phase 2 handles the multi-version/multi-domain concern. Phase 3 makes the system self-maintaining.
+Each phase is independently useful. Phase 1 alone answers the reviewer's provenance question. Phase 2 handles the multi-version/multi-domain concern. Phase 3 makes the system self-maintaining — with continuous monitoring that costs nothing and expensive confirmation only when there's reason to suspect a problem.
