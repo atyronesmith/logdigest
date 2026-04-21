@@ -265,8 +265,8 @@ When triggered (unknown_pct threshold crossed + logprob confirmation):
 └──────────┬───────────────────┘
            ▼
 ┌──────────────────────────────┐
-│ Merge: new patterns +        │
-│ existing validated ones       │
+│ Merge with conflict          │
+│ resolution (see below)       │
 └──────────┬───────────────────┘
            ▼
 ┌──────────────────────────────┐
@@ -280,6 +280,52 @@ When triggered (unknown_pct threshold crossed + logprob confirmation):
 │ Store new logprob baseline   │
 └──────────────────────────────┘
 ```
+
+### Pattern Merge Conflict Resolution
+
+The dangerous scenario: Ansible 2.17 ships, the pipeline auto-re-derives, and a line pattern that was classified as signal (e.g., a specific fatal-error format) now appears in 6% of the new corpus and gets reclassified as noise. Silent replacement would strip errors from pre-digested output.
+
+**Core rule: signal always wins.** A pattern classified as signal in the existing set cannot be reclassified as noise by re-derivation. This is asymmetric by design — false noise (stripping a real error) is catastrophic, false signal (keeping a noise line) is merely wasteful.
+
+**Conflict categories and resolution:**
+
+| Existing | New | Resolution |
+|----------|-----|------------|
+| signal | signal | Keep. Update confidence/frequency if changed. |
+| signal | noise | **Block.** Flag for manual review. Never auto-demote. |
+| signal | absent | Keep. Pattern may not appear in new corpus but is still valid. |
+| noise | noise | Keep. Update confidence/frequency. |
+| noise | signal | **Promote.** Auto-accept — promoting noise to signal is safe. |
+| noise | absent | Keep, but mark `stale: true`. Review on next cycle. |
+| absent | noise | Add as noise candidate, subject to validation (Step 3). |
+| absent | signal | Add as signal. |
+
+**The signal→noise block in detail:**
+
+When re-derivation wants to reclassify a signal pattern as noise, this goes into a conflict report rather than the merged pattern set:
+
+```json
+{
+  "conflicts": [
+    {
+      "pattern": "^fatal: \\[",
+      "existing_class": "signal",
+      "proposed_class": "noise",
+      "reason": "appeared in 6.2% of new corpus (threshold 5%)",
+      "existing_confidence": 0.99,
+      "new_confidence": 0.87,
+      "action": "blocked",
+      "requires": "manual_review"
+    }
+  ]
+}
+```
+
+The operator reviews the conflict report. The pattern stays signal until explicitly demoted. This is the one place the pipeline is deliberately not fully automated — the cost of a wrong demotion (stripping errors) outweighs the cost of a human review.
+
+**Why not confidence-based tie-breaking:** Confidence scores are not comparable across derivation runs. A pattern trained on 500 2.16 logs and a pattern trained on 200 2.17 logs have different confidence scales. Comparing 0.99 vs 0.87 across runs is meaningless. The asymmetric rule (signal wins) avoids the need for cross-run confidence comparison entirely.
+
+**Stale pattern handling:** Noise patterns marked `stale: true` (present in existing set, absent in new corpus) are kept for two re-derivation cycles. If still absent after two cycles, they're removed — the log format has moved on and the pattern is dead weight. Signal patterns are never auto-removed regardless of staleness.
 
 ### Configuration
 
