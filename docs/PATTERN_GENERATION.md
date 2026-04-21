@@ -83,7 +83,9 @@ Drain3 emits templates with `<*>` wildcards (e.g., `ok: [<*>]`). Convert these t
 
 1. **Exact templates** (no wildcards) → literal pattern (e.g., `^TASKS RECAP$`)
 2. **Prefix-wildcard templates** → prefix regex (e.g., `ok: [<*>]` → `^ok: \[`)
-3. **Multi-wildcard templates** → structural regex with `.*?` or `\S+` at wildcard positions, following drift's `autogen._generate_regex()` for escaping and anchoring
+3. **Multi-wildcard templates** → structural regex with `.*?` or `\S+` at wildcard positions, with proper escaping and anchoring
+
+The template-to-regex conversion is inspired by drift's `autogen._generate_regex()`, but that code targets JSON field extraction from LLM outputs — different input structure, different assumptions about what's variable vs. invariant. `drift discover` is a new pipeline, not a refactor of autogen.
 
 Each generated regex is validated against all members of the Drain3 cluster it came from, plus cross-checked against signal clusters to prevent false matches.
 
@@ -196,7 +198,17 @@ Pipeline: `corpus_entropy` → line frequency analysis → prefix clustering →
 New in denoise:
 
 - `PatternSet` class in `domain_base.py` that loads from JSON or falls back to compiled defaults
-- Each domain module switches from `NOISE_PATTERNS = [...]` to `NOISE_PATTERNS = PatternSet.load("ansible", version="default")`
+- Each domain module switches from `NOISE_PATTERNS = [...]` to `NOISE_PATTERNS = PatternSet.load("ansible")`
+
+**Version resolution in `PatternSet.load(domain, version=None)`:**
+
+| `version` argument | Behavior |
+|---------------------|----------|
+| `None` (default) | Load the hand-authored baseline (`ansible.json`). This is the current compiled pattern list, exported to JSON — known-good, manually validated. |
+| `"latest"` | Load the most recently generated pattern file for this domain (by `generated` timestamp in the JSON). Falls back to baseline if no generated files exist. |
+| `"2.16"` (explicit) | Load the named version file. Error if not found — no silent fallback when a specific version is requested. |
+
+The baseline file is always the hand-authored patterns. Generated files from `drift discover` are stored alongside it but never replace it. `None` (baseline) is the safe default for any deployment that hasn't run the discovery pipeline.
 
 ## Phase 2: Domain/Version Classifier
 
