@@ -157,20 +157,24 @@ Version markers to extract (for metadata, not necessarily for pattern routing):
 | CI/CD | `Runner v2.x`, `Jenkins 2.x`, `GitLab Runner x.y` in preamble |
 | systemd | `systemd[1]: systemd 252` or similar in early boot lines |
 
-**Multi-domain support** — a single log stream may contain multiple domains (Ansible calling `oc logs`, CI/CD running Ansible playbooks). The classifier should return a ranked list of detected domains with byte ranges:
+**Multi-domain support** — a single log stream often contains multiple domains. CI/CD output that invokes Ansible that calls kubectl is the common case, not an edge case. Domain boundaries are not clean: a single line can be GHA framing (`##[group]`) wrapping Ansible output that includes an embedded K8s API response.
+
+Byte-range segmentation (assigning each range to one domain) is the wrong abstraction for this. Instead, apply all detected domain pattern sets to every line, with per-line priority ordering:
 
 ```python
 from denoise import classify_log
 
 result = classify_log(text)
-# [
-#   {"domain": "cicd", "range": (0, 5000)},
-#   {"domain": "ansible", "range": (5001, 45000)},
-#   {"domain": "mustgather", "range": (45001, 80000)},
-# ]
+# {
+#   "domains_detected": ["cicd", "ansible"],
+#   "primary": "ansible",        # highest pattern match rate
+#   "pattern_sets_applied": ["cicd", "ansible"],  # all sets run on every line
+# }
 ```
 
-Each segment gets its domain pattern set. Unknown segments fall through to the general-purpose `core.py` cleaner.
+Each line is tested against all detected domain pattern sets. If multiple patterns match, the most specific wins (e.g., an Ansible `ok:` pattern takes priority over a generic CI/CD "command output" pattern). Lines that match no domain pattern fall through to `core.py`.
+
+This needs prototyping on real multi-domain logs (CI-running-Ansible is the test case) before committing to a final interface. The current single-domain `_detect_domain()` + dispatch in `mcp.py` works for clean single-domain inputs and remains the default path.
 
 ### Pattern Set Storage
 
