@@ -1,6 +1,6 @@
 """Tests for denoise CI/CD log pre-digestion."""
 
-from denoise.cicd import (
+from logdigest.cicd import (
     classify_line,
     detect_ci_system,
     predigest,

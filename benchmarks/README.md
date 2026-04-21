@@ -1,6 +1,6 @@
 # Benchmarks
 
-Reproducible benchmarks for denoise's headline claims.
+Reproducible benchmarks for logdigest's headline claims.
 
 ## Quick start
 
@@ -31,7 +31,7 @@ The headline numbers in `docs/PREDIGESTION.md` (83.1% token savings on 500 real 
 python scripts/predigest_corpus_stats.py --log-dir /path/to/ansible/logs -o results.json
 ```
 
-The synthetic benchmarks here verify that denoise's pre-digestion machinery produces equivalent savings on structurally similar input.
+The synthetic benchmarks here verify that logdigest's pre-digestion machinery produces equivalent savings on structurally similar input.
 
 ## Adding a benchmark
 

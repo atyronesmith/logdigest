@@ -1,28 +1,28 @@
-"""MCP server for denoise pre-digestion tools.
+"""MCP server for logdigest pre-digestion tools.
 
-Exposes denoise as tools that Claude Code (or any MCP client) can call
+Exposes logdigest as tools that Claude Code (or any MCP client) can call
 to pre-digest logs before reasoning about them.
 
 Usage:
     # stdio transport (for Claude Code)
-    uv run python -m denoise.mcp
+    uv run python -m logdigest.mcp
 
     # Or via fastmcp CLI
-    fastmcp run denoise.mcp:mcp
+    fastmcp run logdigest.mcp:mcp
 """
 
 from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from denoise.ansible import predigest as ansible_predigest
-from denoise.mustgather import predigest as mustgather_predigest
-from denoise.cicd import predigest as cicd_predigest, detect_ci_system
-from denoise.journald import predigest as journald_predigest
-from denoise.entropy import corpus_entropy, entropy_report
+from logdigest.ansible import predigest as ansible_predigest
+from logdigest.mustgather import predigest as mustgather_predigest
+from logdigest.cicd import predigest as cicd_predigest, detect_ci_system
+from logdigest.journald import predigest as journald_predigest
+from logdigest.entropy import corpus_entropy, entropy_report
 
 mcp = FastMCP(
-    "denoise",
+    "logdigest",
     instructions=(
         "Pre-digestion tools for noisy log data. Use `predigest` to clean "
         "logs before analysis — it strips noise (health checks, dependency "
@@ -90,7 +90,7 @@ def predigest(text: str, domain: str | None = None) -> str:
         return digester(text)
 
     # Fallback: apply general-purpose cleaning
-    from denoise.core import predigest_document
+    from logdigest.core import predigest_document
     return predigest_document(text)
 
 

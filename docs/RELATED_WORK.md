@@ -2,7 +2,7 @@
 
 ## Log Template Mining
 
-**Drain3** (logpai) is the de facto standard for log template mining. It parses log lines into a fixed-depth tree by token position, clusters lines into templates unsupervised, and runs in streaming mode. It is the right tool for Level 1 (line-level) pattern discovery, and denoise's pattern generation pipeline uses it as the clustering engine (see `PATTERN_GENERATION.md`).
+**Drain3** (logpai) is the de facto standard for log template mining. It parses log lines into a fixed-depth tree by token position, clusters lines into templates unsupervised, and runs in streaming mode. It is the right tool for Level 1 (line-level) pattern discovery, and logdigest's pattern generation pipeline uses it as the clustering engine (see `PATTERN_GENERATION.md`).
 
 Denoise's contribution is not at the line level. It's the three-level expansion beyond what Drain3 does:
 
@@ -12,7 +12,7 @@ Denoise's contribution is not at the line level. It's the three-level expansion 
 
 ## Prompt Compression
 
-**LLMLingua / LongLLMLingua / LLMLingua-2** (Microsoft) compress prompts by scoring token importance with a small language model, achieving 5-20x compression. The goal overlaps with denoise — reduce tokens before they reach the LLM — but the mechanism and tradeoffs differ:
+**LLMLingua / LongLLMLingua / LLMLingua-2** (Microsoft) compress prompts by scoring token importance with a small language model, achieving 5-20x compression. The goal overlaps with logdigest — reduce tokens before they reach the LLM — but the mechanism and tradeoffs differ:
 
 | | Denoise | LLMLingua |
 |---|---|---|
@@ -29,7 +29,7 @@ LLMLingua is the better choice when the input is free-form natural language with
 
 ## MCP Ecosystem
 
-**kubernetes-mcp-server / openshift-mcp-server** (containers/openshift orgs) expose kubectl/oc commands as MCP tools. Denoise is complementary: these servers produce log output, denoise pre-digests it before it reaches the LLM's context window. The composition doesn't happen automatically today (MCP tools don't chain), but denoise sitting between diagnostic output and LLM context is the intended deployment model.
+**kubernetes-mcp-server / openshift-mcp-server** (containers/openshift orgs) expose kubectl/oc commands as MCP tools. Denoise is complementary: these servers produce log output, logdigest pre-digests it before it reaches the LLM's context window. The composition doesn't happen automatically today (MCP tools don't chain), but logdigest sitting between diagnostic output and LLM context is the intended deployment model.
 
 **token-optimizer-mcp** (ooples) claims 95%+ token reduction for Claude Code via caching and compression. Different goal: it caches and compresses MCP tool output generically. Denoise operates on domain-specific log content with semantic understanding of what's noise vs. signal.
 
@@ -39,7 +39,7 @@ LLMLingua is the better choice when the input is free-form natural language with
 
 ## Log Anomaly Detection
 
-**DeepLog, LogRobust, LogAnomaly** use deep learning for log anomaly detection. Adjacent but different goal — they find anomalous log sequences, denoise removes known-noise log lines. No overlap in mechanism or output.
+**DeepLog, LogRobust, LogAnomaly** use deep learning for log anomaly detection. Adjacent but different goal — they find anomalous log sequences, logdigest removes known-noise log lines. No overlap in mechanism or output.
 
 ## Document Preprocessing for RAG
 

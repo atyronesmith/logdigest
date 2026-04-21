@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from generate_corpus import generate_corpus
 
-from denoise.entropy import corpus_entropy
+from logdigest.entropy import corpus_entropy
 
 
 def run():

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Denoise is a Python library for task-aware pre-digestion of log data before RAG/LLM processing. It provides general-purpose cleaning (boilerplate detection, deduplication) and domain-specific modules (Ansible, OpenShift must-gather, CI/CD, systemd journal). Pure Python 3.11+, zero runtime dependencies for core; MCP server requires `fastmcp`, RAG support requires `numpy`.
+logdigest is a Python library for task-aware pre-digestion of log data before RAG/LLM processing. It provides general-purpose cleaning (boilerplate detection, deduplication) and domain-specific modules (Ansible, OpenShift must-gather, CI/CD, systemd journal). Pure Python 3.11+, zero runtime dependencies for core; MCP server requires `fastmcp`, RAG support requires `numpy`.
 
 ## Commands
 
@@ -25,23 +25,25 @@ No linter or formatter is currently configured.
 
 **Two-layer design:** domain-agnostic core + domain-specific modules, with shared machinery in `domain_base.py`.
 
-- `src/denoise/core.py` — General-purpose pipeline: boilerplate detection, MD5 deduplication, per-document cleaning. Stateless functional style.
+- `src/logdigest/core.py` — General-purpose pipeline: boilerplate detection, MD5 deduplication, per-document cleaning. Stateless functional style.
 
-- `src/denoise/domain_base.py` — Shared machinery for domain modules: `classify_line()`, `analyze_lines()`, `find_large_blobs()`. Domain modules define pattern lists; shared code does the rest.
+- `src/logdigest/domain_base.py` — Shared machinery for domain modules: `classify_line()`, `analyze_lines()`, `find_large_blobs()`, `predigest_stream()`. Domain modules define pattern lists; shared code does the rest.
 
-- `src/denoise/ansible.py` — Ansible log compression. Three levels: (1) line-level classification via regex, (2) block-level dedup (retry loops, item loops), (3) blob-level truncation (K8s API responses). Entry point: `predigest()`.
+- `src/logdigest/ansible.py` — Ansible log compression. Three levels: (1) line-level classification via regex, (2) block-level dedup (retry loops, item loops), (3) blob-level truncation (K8s API responses). Entry point: `predigest()`.
 
-- `src/denoise/mustgather.py` — OpenShift must-gather. Health checks, leader election, managedFields. `predigest_bundle()` for directory walking.
+- `src/logdigest/mustgather.py` — OpenShift must-gather. Health checks, leader election, managedFields. `predigest_bundle()` for directory walking.
 
-- `src/denoise/cicd.py` — GitHub Actions / Jenkins / GitLab CI. `detect_ci_system()` auto-detection.
+- `src/logdigest/cicd.py` — GitHub Actions / Jenkins / GitLab CI. `detect_ci_system()` auto-detection.
 
-- `src/denoise/journald.py` — systemd journal. Stack trace truncation, timestamp normalization.
+- `src/logdigest/journald.py` — systemd journal. Stack trace truncation, timestamp normalization.
 
-- `src/denoise/entropy.py` — Entropy pre-flight: `corpus_entropy()` predicts impact before building a module.
+- `src/logdigest/entropy.py` — Entropy pre-flight: `corpus_entropy()` predicts impact before building a module.
 
-- `src/denoise/mcp.py` — MCP server exposing `predigest`, `detect_domain`, `entropy_check` tools.
+- `src/logdigest/mcp.py` — MCP server exposing `predigest`, `detect_domain`, `entropy_check` tools.
 
-- `src/denoise/__init__.py` — Public API re-exports from `core.py` and `entropy.py`. Domain modules used directly.
+- `src/logdigest/__init__.py` — Public API re-exports from `core.py` and `entropy.py`. Domain modules used directly.
+
+All domain modules support streaming pre-digestion for files >50MB via `predigest_file_streaming()`.
 
 ## Documentation
 
@@ -62,8 +64,8 @@ Guard/classifier/monitor code was moved to the drift sibling repo (`drift/src/dr
 
 ## Relationship to Drift
 
-Denoise is the **runtime pre-digestion library**. The drift sibling repo handles training, probing, experimentation, and safety classification.
+logdigest is the **runtime pre-digestion library**. The drift sibling repo handles training, probing, experimentation, and safety classification.
 
-- Drift experiments validate denoise's pre-digestion effectiveness
+- Drift experiments validate logdigest's pre-digestion effectiveness
 - Drift will provide `drift discover` for automated pattern generation (planned)
 - Guard classification and drift monitoring live in `drift/src/drift/safety/`, not here

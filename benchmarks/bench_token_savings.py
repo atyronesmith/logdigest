@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from generate_corpus import generate_corpus
 
-from denoise.ansible import predigest
+from logdigest.ansible import predigest
 
 
 def run(n_logs=200):

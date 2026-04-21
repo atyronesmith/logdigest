@@ -111,7 +111,7 @@ Shared machinery (`domain_base.py`) provides `classify_line()`, `analyze_lines()
 Before investing in a new domain module, run the entropy diagnostic:
 
 ```python
-from denoise import corpus_entropy
+from logdigest import corpus_entropy
 result = corpus_entropy(documents)
 # predicted_impact: "high" (>60% redundancy) / "medium" / "low" / "none"
 ```
@@ -130,6 +130,6 @@ Denoise is the **runtime library** for pre-digestion. The drift sibling project 
 
 - Drift measures *whether* pre-digestion helps for a given corpus (entropy analysis, quality comparisons)
 - Denoise *implements* the pre-digestion that drift validates
-- Drift's `drift probe` and `drift distill` commands train classifiers that denoise runs at inference time
+- Drift's `drift probe` and `drift distill` commands train classifiers that logdigest runs at inference time
 
 For full experiment details, see the drift repo's `docs/PAPER.md` and `docs/RESULTS.md`.

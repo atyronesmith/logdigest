@@ -1,4 +1,4 @@
-# denoise
+# logdigest
 
 Task-aware pre-digestion for RAG and LLM pipelines. Removes low-entropy content (boilerplate, duplicates, noise) from document corpora before they reach your retrieval or generation stage.
 
@@ -13,16 +13,16 @@ Task-aware pre-digestion for RAG and LLM pipelines. Removes low-entropy content 
 
 ```bash
 # Core library
-pip install denoise
+pip install logdigest
 
 # With optional RAG support
-pip install "denoise[rag]"
+pip install "logdigest[rag]"
 ```
 
 ## Quick Start
 
 ```python
-from denoise import predigest_document, build_boilerplate_set, dedup_documents
+from logdigest import predigest_document, build_boilerplate_set, dedup_documents
 
 # Clean a single document
 cleaned = predigest_document(text)
@@ -36,24 +36,24 @@ unique_docs = dedup_documents(docs)
 For domain-specific logs:
 
 ```python
-from denoise.ansible import predigest
+from logdigest.ansible import predigest
 compressed = predigest(ansible_log_text)
 
-from denoise.mustgather import predigest, predigest_bundle
+from logdigest.mustgather import predigest, predigest_bundle
 compressed = predigest(pod_log_text)
 bundle = predigest_bundle(Path("must-gather-dir/"))  # walks entire bundle
 
-from denoise.cicd import predigest, detect_ci_system
+from logdigest.cicd import predigest, detect_ci_system
 compressed = predigest(github_actions_log)  # auto-detects CI system
 
-from denoise.journald import predigest
+from logdigest.journald import predigest
 compressed = predigest(journalctl_output)
 ```
 
 Entropy pre-flight (should I build a module for this corpus?):
 
 ```python
-from denoise import corpus_entropy
+from logdigest import corpus_entropy
 
 result = corpus_entropy(my_documents)
 # result["predicted_impact"]  → "high" / "medium" / "low" / "none"
@@ -62,7 +62,7 @@ result = corpus_entropy(my_documents)
 
 ## MCP Server (Claude Code Integration)
 
-Denoise can run as an MCP server, giving Claude Code automatic access to pre-digestion tools. Claude will auto-detect the log type and clean it before analysis.
+logdigest can run as an MCP server, giving Claude Code automatic access to pre-digestion tools. Claude will auto-detect the log type and clean it before analysis.
 
 ```bash
 # Install with MCP support
@@ -74,9 +74,9 @@ Add to your project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "denoise": {
+    "logdigest": {
       "command": "uv",
-      "args": ["--directory", "/path/to/denoise", "run", "python", "-m", "denoise"],
+      "args": ["--directory", "/path/to/logdigest", "run", "python", "-m", "logdigest"],
       "env": {}
     }
   }
@@ -87,7 +87,7 @@ Three tools are exposed: `predigest` (clean logs), `detect_domain` (identify log
 
 ### Composing with OpenShift MCP Servers
 
-Denoise pairs naturally with cluster diagnostic MCP servers like [openshift-mcp-server](https://github.com/rh-ecosystem-edge/openshift-mcp-server). The diagnostic server pulls must-gather bundles, pod logs, and cluster events; denoise pre-digests them before they reach the LLM context window. On real must-gather bundles this cuts diagnostic context by 80-90%, which is the difference between a useful triage response and one that truncates or hallucinates mid-analysis. Today the composition is manual (call `predigest`, then pass the result to the diagnostic tool), but wiring the two MCP servers together in a single `.mcp.json` is the intended workflow — Claude Code sees both tool sets and can chain them in a single conversation.
+logdigest pairs naturally with cluster diagnostic MCP servers like [openshift-mcp-server](https://github.com/rh-ecosystem-edge/openshift-mcp-server). The diagnostic server pulls must-gather bundles, pod logs, and cluster events; logdigest pre-digests them before they reach the LLM context window. On real must-gather bundles this cuts diagnostic context by 80-90%, which is the difference between a useful triage response and one that truncates or hallucinates mid-analysis. Today the composition is manual (call `predigest`, then pass the result to the diagnostic tool), but wiring the two MCP servers together in a single `.mcp.json` is the intended workflow — Claude Code sees both tool sets and can chain them in a single conversation.
 
 ## Documentation
 

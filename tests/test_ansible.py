@@ -1,6 +1,6 @@
 """Tests for denoise Ansible log pre-digestion."""
 
-from denoise.ansible import classify_line, predigest, predigest_file_streaming
+from logdigest.ansible import classify_line, predigest, predigest_file_streaming
 
 
 def test_classify_noise():

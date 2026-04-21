@@ -13,7 +13,7 @@ Three levels of compression:
 import re
 from pathlib import Path
 
-from denoise.domain_base import (
+from logdigest.domain_base import (
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
