@@ -3,6 +3,7 @@
 from denoise.mustgather import (
     classify_line,
     predigest,
+    predigest_file_streaming,
     find_health_check_blocks,
     find_leader_election_blocks,
     find_managed_fields_blocks,
@@ -208,3 +209,80 @@ def test_predigest_no_noise():
     result = predigest(log)
     assert "important log line 1" in result
     assert "important log line 2" in result
+
+
+# ---------------------------------------------------------------------------
+# Streaming pre-digestion
+# ---------------------------------------------------------------------------
+
+def test_streaming_strips_noise(tmp_path):
+    log = "\n".join([
+        "caches populated",
+        '"GET /healthz" 200 1ms',
+        "successfully renewed lease kube-system/sched",
+        "Throttling request",
+        "some normal operator log",
+        "another normal log",
+        "another normal log",
+        "another normal log",
+        'level=error msg="pod crashed"',
+        '  resourceVersion: "999"',
+    ])
+    path = tmp_path / "pod.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "caches populated" not in result
+    assert "Throttling" not in result
+    assert "level=error" in result
+
+
+def test_streaming_preserves_error_context(tmp_path):
+    log = "\n".join([
+        "normal line 1",
+        "normal line 2",
+        "normal line 3",
+        'level=error msg="crash"',
+        "normal line 4",
+        "normal line 5",
+    ])
+    path = tmp_path / "pod.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "level=error" in result
+    assert "normal line 3" in result
+
+
+def test_streaming_handles_large_blob(tmp_path):
+    blob = "x" * 300 + " 'metadata': {'name': 'foo'} 'kind': 'Pod' " + "y" * 300
+    log = f"normal line\n{blob}\nanother line"
+    path = tmp_path / "pod.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "[K8S API RESPONSE:" in result
+    assert "normal line" in result
+
+
+def test_streaming_matches_inmemory(tmp_path):
+    """Streaming and in-memory should produce similar output."""
+    log = "\n".join([
+        "caches populated",
+        "normal log",
+        "another normal log",
+        "more logs here",
+        "yet more logs here",
+        "still more logs here",
+        "even more logs here",
+        'level=error msg="something broke"',
+        "final line",
+    ])
+    path = tmp_path / "pod.log"
+    path.write_text(log)
+
+    inmem = predigest(log)
+    streamed = predigest_file_streaming(path)
+
+    assert "level=error" in inmem
+    assert "level=error" in streamed
+    # "caches populated" is >3 lines from the error, so both strip it
+    assert "caches populated" not in inmem
+    assert "caches populated" not in streamed
