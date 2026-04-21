@@ -20,6 +20,7 @@ from denoise.domain_base import (
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
+    predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
@@ -371,9 +372,39 @@ def predigest(text: str, ci_system: str | None = None) -> str:
 
 
 def predigest_file(filepath: Path) -> str:
-    """Pre-digest a single CI/CD log file."""
+    """Pre-digest a single CI/CD log file.
+
+    For small files, loads into memory. For large files (>50MB),
+    uses streaming to avoid OOM.
+    """
+    size = filepath.stat().st_size
+    if size > 50 * 1024 * 1024:
+        return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
+
+
+def _blob_handler(line: str) -> str | None:
+    """Replace large dependency tree lines with summaries."""
+    if "node_modules" in line or "site-packages" in line:
+        return "[DEPENDENCY TREE: large output omitted]"
+    return None
+
+
+def predigest_file_streaming(filepath: Path) -> str:
+    """Pre-digest a CI/CD log file using streaming."""
+    output: list[str] = []
+    with open(filepath, errors="replace") as f:
+        predigest_stream(
+            source=f,
+            noise_patterns=NOISE_PATTERNS,
+            signal_patterns=SIGNAL_PATTERNS,
+            sink=output,
+            error_context=3,
+            max_line_len=500,
+            blob_handler=_blob_handler,
+        )
+    return "\n".join(output)
 
 
 def analyze_log(filepath: Path) -> dict:
