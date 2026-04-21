@@ -119,6 +119,70 @@ Output is a JSON pattern set, not Python source:
 
 Domain modules load patterns from JSON at import time, falling back to the current compiled defaults if no pattern file is present.
 
+### Schema Validation
+
+The `PatternSet` loader validates every pattern file against a JSON Schema on load, before attempting regex compilation. A malformed file (missing `label`, invalid regex syntax, wrong type for `confidence`) produces a clear validation error at load time, not a `re.error` deep in `classify_line()`.
+
+Schema ships as `denoise/schemas/pattern_set.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["domain", "generated", "noise_patterns", "signal_patterns"],
+  "properties": {
+    "domain": { "type": "string" },
+    "version": { "type": "string" },
+    "generated": { "type": "string", "format": "date-time" },
+    "corpus_size": { "type": "integer", "minimum": 0 },
+    "noise_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "signal_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "baseline_entropy": {
+      "type": "object",
+      "description": "Logprob baseline histogram for drift detection"
+    },
+    "conflicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conflict" }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "required": ["regex", "label"],
+      "properties": {
+        "regex": { "type": "string" },
+        "label": { "type": "string", "pattern": "^[a-z_]+$" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "corpus_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stale": { "type": "boolean" },
+        "stale_cycles": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["pattern", "existing_class", "proposed_class", "action"],
+      "properties": {
+        "pattern": { "type": "string" },
+        "existing_class": { "enum": ["noise", "signal"] },
+        "proposed_class": { "enum": ["noise", "signal"] },
+        "reason": { "type": "string" },
+        "action": { "enum": ["blocked", "promoted", "added"] },
+        "requires": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+The loader additionally validates that every `regex` field compiles successfully via `re.compile()` after schema validation passes. Schema validation uses stdlib `json` for parsing; the `jsonschema` package is an optional dependency (`pip install denoise[dev]`). If `jsonschema` is not installed, the loader skips schema validation and falls back to regex-compile-time error checking only, with a warning.
+
 ### Implementation
 
 New in drift:
@@ -360,7 +424,7 @@ manager = PatternManager(
 
 ## Implementation Order
 
-1. **Phase 1a** — JSON pattern format + `PatternSet` loader in denoise (patterns still hand-authored, but externalized from Python source)
+1. **Phase 1a** — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in denoise (patterns still hand-authored, but externalized from Python source)
 2. **Phase 1b** — `drift discover` command (corpus → pattern JSON)
 3. **Phase 1c** — Re-derive current hand-authored patterns via the pipeline, proving the loop works
 4. **Phase 2a** — Version detection in `classify_log()`
