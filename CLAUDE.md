@@ -4,50 +4,66 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Denoise is a Python library for removing low-entropy content (noise) from document corpora before RAG/LLM processing. It provides general-purpose pre-digestion (boilerplate detection, deduplication, separator removal) and domain-specific preprocessing (Ansible log compression). Pure Python, no runtime dependencies.
+Denoise is a Python library for task-aware pre-digestion of log data before RAG/LLM processing. It provides general-purpose cleaning (boilerplate detection, deduplication) and domain-specific modules (Ansible, OpenShift must-gather, CI/CD, systemd journal). Pure Python 3.11+, zero runtime dependencies for core; MCP server requires `fastmcp`, RAG support requires `numpy`.
 
 ## Commands
 
 ```bash
-# Install for development (uses uv)
+# Install for development (uses uv, not pip)
 uv pip install -e ".[dev]"
 
 # Run all tests
 python -m pytest -v
 
-# Run a single test file
-python -m pytest tests/test_core.py -v
-
-# Run a specific test
-python -m pytest tests/test_core.py::test_function_name -v
+# Run benchmarks
+uv run python benchmarks/run_all.py
 ```
 
 No linter or formatter is currently configured.
 
 ## Architecture
 
-**Two-layer design:** a domain-agnostic core + domain-specific modules.
+**Two-layer design:** domain-agnostic core + domain-specific modules, with shared machinery in `domain_base.py`.
 
-- `src/denoise/core.py` — General-purpose pipeline: corpus-level boilerplate detection (`build_boilerplate_set`), MD5 deduplication (`dedup_documents`), per-document cleaning (`predigest_document`), and full orchestration (`predigest_corpus`). Stateless functional style.
+- `src/denoise/core.py` — General-purpose pipeline: boilerplate detection, MD5 deduplication, per-document cleaning. Stateless functional style.
 
-- `src/denoise/ansible.py` — Ansible log compression using three passes: (1) line-level classification via regex into noise/signal/unknown, (2) block-level deduplication collapsing retry and ok-item loops, (3) blob-level truncation of large JSON (K8s API responses). Entry point is `predigest()`.
+- `src/denoise/domain_base.py` — Shared machinery for domain modules: `classify_line()`, `analyze_lines()`, `find_large_blobs()`. Domain modules define pattern lists; shared code does the rest.
 
-- `src/denoise/__init__.py` — Public API re-exports from `core.py` only. Ansible module is used directly.
+- `src/denoise/ansible.py` — Ansible log compression. Three levels: (1) line-level classification via regex, (2) block-level dedup (retry loops, item loops), (3) blob-level truncation (K8s API responses). Entry point: `predigest()`.
 
-The project is a library (no CLI entry points). Built with hatchling, dependencies managed with uv.
+- `src/denoise/mustgather.py` — OpenShift must-gather. Health checks, leader election, managedFields. `predigest_bundle()` for directory walking.
+
+- `src/denoise/cicd.py` — GitHub Actions / Jenkins / GitLab CI. `detect_ci_system()` auto-detection.
+
+- `src/denoise/journald.py` — systemd journal. Stack trace truncation, timestamp normalization.
+
+- `src/denoise/entropy.py` — Entropy pre-flight: `corpus_entropy()` predicts impact before building a module.
+
+- `src/denoise/mcp.py` — MCP server exposing `predigest`, `detect_domain`, `entropy_check` tools.
+
+- `src/denoise/__init__.py` — Public API re-exports from `core.py` and `entropy.py`. Domain modules used directly.
 
 ## Documentation
 
 - `docs/PREDIGESTION.md` — Theory (entropy bounds, scope), results (83% token savings, RAG validation)
-- `docs/GUARD.md` — Guard module: pre-digestion, tiered classification, empirical findings (47.8% FPR, coin-flip confidence)
-- `docs/CONTINUOUS_CALIBRATION.md` — Runtime drift detection, JSD monitoring, auto-retrain workflow
-- `docs/CONDITIONAL_CLASSIFIERS.md` — Planned: conditional classifiers, escalation enrichment
+- `docs/PATTERN_GENERATION.md` — Automated pattern discovery plan (Drain3, drift detection, conflict resolution)
+- `docs/RELATED_WORK.md` — Positioning vs Drain3, LLMLingua, MCP ecosystem
+
+## Benchmarks
+
+- `benchmarks/run_all.py` — Run all benchmarks
+- `benchmarks/bench_token_savings.py` — Token savings (84.5% on synthetic Ansible logs)
+- `benchmarks/bench_entropy_prediction.py` — Entropy pre-flight accuracy
+- `benchmarks/generate_corpus.py` — Synthetic Ansible log corpus generator
+
+## What is NOT in this repo
+
+Guard/classifier/monitor code was moved to the drift sibling repo (`drift/src/drift/safety/`). Do not look for or create `guard.py` or `monitor.py` here.
 
 ## Relationship to Drift
 
-Denoise is the **runtime library**. The drift sibling repo is where training, probing, and experimentation happen.
+Denoise is the **runtime pre-digestion library**. The drift sibling repo handles training, probing, experimentation, and safety classification.
 
-- Drift trains classifiers (`drift distill`, `scripts/train_guard_classifier.py`) → exports weights
-- Denoise loads weights and runs classifiers at inference time
-- Drift validates denoise's accuracy across experiments
-- Shared contract: weight serialization format (JSON with vocabulary, weight matrices, bias vectors)
+- Drift experiments validate denoise's pre-digestion effectiveness
+- Drift will provide `drift discover` for automated pattern generation (planned)
+- Guard classification and drift monitoring live in `drift/src/drift/safety/`, not here
