@@ -39,26 +39,37 @@ Three components, built incrementally:
 
 ### Step 1: Corpus Entropy Analysis
 
-Use `corpus_entropy()` to identify high-redundancy corpora worth processing. For corpora that pass the threshold, compute per-line entropy:
+Three distinct entropy operations, each answering a different question:
+
+**Operation 1: Corpus-level line-frequency entropy.** Treat each unique stripped line as a symbol. Compute Shannon entropy of the frequency distribution across the entire corpus. Low entropy means a few line patterns dominate the corpus (e.g., `ok: [host]` appears 40,000 times across 500 logs). This is the pre-flight gate — if line-frequency entropy is high (many unique lines, flat distribution), the corpus has little redundancy and pattern discovery won't help. This is what `line_entropy()` in `entropy.py` already computes.
 
 ```python
-from denoise.entropy import line_entropy
-
-# Per-line frequency analysis across corpus
+# Corpus-level: how concentrated is the line distribution?
 line_counts = Counter(line.strip() for doc in corpus for line in doc.splitlines())
+# Shannon entropy of this distribution → low = dominated by few patterns = good candidate
 ```
 
-Lines that appear in >5% of documents with low per-line entropy are noise candidates. Lines that appear rarely and contain known error tokens (fatal, error, failed, panic, traceback) are signal candidates.
+**Operation 2: Prefix-cluster compactness.** Group lines by shared prefix (longest common prefix ≥ 8 chars). For each cluster, measure within-cluster variance on the suffix. Tight clusters (low suffix variance, high member count) indicate an invariant template with a variable tail — exactly what becomes a regex. This is the operation that discovers patterns.
+
+```python
+# Prefix clustering: group "ok: [host1]", "ok: [host2]", ... → prefix "ok: ["
+# Low suffix variance + high frequency → noise candidate
+# High suffix variance or low frequency → not a template, skip
+```
+
+**Operation 3: Character-level entropy per line.** Shannon entropy of the character distribution within a single line. Only useful as a filter for two edge cases: separator lines (`==========`, entropy ≈ 0) and base64/hex blobs (entropy ≈ 5.5+). Not a primary signal for pattern discovery.
+
+Lines are classified as noise candidates when they belong to high-frequency, low-variance prefix clusters (Operation 2) within a corpus that has low line-frequency entropy (Operation 1). Lines are classified as signal candidates when they appear rarely and contain known error tokens (fatal, error, failed, panic, traceback).
 
 ### Step 2: Candidate Regex Generation
 
-For each cluster of similar noise lines, generate a regex that captures the pattern:
+For each prefix cluster identified in Step 1, generate a regex:
 
-1. **Exact match lines** — lines identical across documents become literal patterns
-2. **Prefix clusters** — lines sharing a common prefix with variable suffixes (e.g., `ok: [hostname]`) become prefix regex (`^ok: \[`)
-3. **Structural patterns** — lines matching a structural template (timestamp + level + message) get templated regex
+1. **Exact match clusters** — all members identical → literal pattern (e.g., `^TASKS RECAP$`)
+2. **Prefix-variable clusters** — shared prefix with variable suffix → prefix regex (e.g., `^ok: \[` captures `ok: [host1]`, `ok: [host2]`, ...)
+3. **Structural template clusters** — members share a structural template (e.g., timestamp + level + message) but vary in multiple positions → templated regex with capture groups for the invariant structure
 
-The generation follows drift's `autogen._generate_regex()` approach: find the invariant prefix/structure, parameterize the variable parts, validate against the source corpus.
+The generation follows drift's `autogen._generate_regex()` approach: extract the invariant prefix/structure from the cluster, parameterize variable positions, validate the generated regex against all cluster members and against the full corpus.
 
 ### Step 3: Validation
 
@@ -190,14 +201,17 @@ The key metric is `unknown_pct` — the fraction of lines that match neither noi
 
 ### Logprob-Based Drift Detection
 
-Extends drift's entropy probing to the pattern generation problem:
+Extends drift's entropy probing to the pattern generation problem. The specific operation:
 
-1. **Periodically** (configurable interval, e.g., every 1000 logs processed), sample a batch of recent logs
-2. **Run `drift probe`** on the batch — get per-token logprobs for the LLM's summary of these logs
-3. **Compare logprob distribution** against the baseline (from when patterns were last generated)
-4. **If JSD exceeds threshold** → patterns are stale, new log content is surprising the model
+1. **At pattern generation time**, run `drift probe` on a sample of pre-digested logs. For each log, the LLM generates a summary; `drift probe` records per-token logprobs. Aggregate into a baseline distribution: the histogram of mean-token-entropy values across the sample. This captures how "surprised" the LLM is by pre-digested content when patterns are fresh.
 
-This catches a subtler failure than unknown_pct alone: patterns might still match syntactically, but the semantic content they're stripping may have changed (e.g., Ansible 2.17 uses the same `ok: [host]` format but the task structure is different, causing the LLM to miss context it needs).
+2. **At runtime** (configurable interval, e.g., every 1000 logs), sample a batch of recently pre-digested logs and run the same probe. Compute the same mean-token-entropy histogram.
+
+3. **Compare the two histograms via JSD.** Jensen-Shannon divergence measures how much the runtime entropy distribution has shifted from baseline. High JSD means the LLM is seeing systematically different content after pre-digestion than it saw when patterns were generated.
+
+4. **If JSD exceeds threshold** → the pre-digested output has changed character, even if classification rates look stable. Trigger re-derivation.
+
+This catches a failure mode that `unknown_pct` misses: patterns still match syntactically, but the semantic content they're stripping has changed. For example, Ansible 2.17 might use the same `ok: [host]` format but restructure task output so that stripping `ok:` lines now removes context the LLM needs. The LLM's rising surprise (higher token entropy on the pre-digested output) surfaces this before downstream quality degrades.
 
 ### Re-derivation Trigger
 
