@@ -98,26 +98,27 @@
     font-weight: 600;
   }
 
-  .links {
-    margin-top: 40px;
+  .hero-links {
     display: flex;
     gap: 16px;
     flex-wrap: wrap;
+    margin-bottom: 32px;
   }
-  .links a {
+  .hero-links a {
     display: inline-block;
-    padding: 10px 20px;
-    border-radius: 6px;
+    padding: 12px 28px;
+    border-radius: 8px;
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     transition: opacity 0.2s;
   }
-  .links a:hover { opacity: 0.85; text-decoration: none; }
-  .links .primary {
+  .hero-links a:hover { opacity: 0.85; text-decoration: none; }
+  .demo-btn {
     background: #238636;
     color: #fff;
+    font-size: 1.1rem;
   }
-  .links .secondary {
+  .gh-btn {
     background: #21262d;
     border: 1px solid #30363d;
     color: #c9d1d9;
@@ -141,6 +142,11 @@
 <div class="container">
   <h1>de<span>noise</span></h1>
   <p class="tagline">Task-aware pre-digestion for RAG and LLM pipelines. Strip the noise before it costs you tokens.</p>
+
+  <div class="hero-links">
+    <a class="demo-btn" href="demo/">Try the Interactive Demo</a>
+    <a class="gh-btn" href="https://github.com/atyronesmith/denoise">GitHub Repository</a>
+  </div>
 
   <h2>What it does</h2>
   <ul>
@@ -181,11 +187,6 @@
     <li><a href="GUARD.html">Guard module</a> — tiered classification, training weights</li>
     <li><a href="CONTINUOUS_CALIBRATION.html">Continuous calibration</a> — runtime drift detection</li>
   </ul>
-
-  <div class="links">
-    <a class="primary" href="https://github.com/atyronesmith/denoise">GitHub Repository</a>
-    <a class="secondary" href="demo/">Interactive Demo</a>
-  </div>
 
   <footer>
     Apache 2.0 &middot; Built with Python &middot; No JavaScript frameworks were harmed
