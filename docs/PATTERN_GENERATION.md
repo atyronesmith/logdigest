@@ -146,12 +146,14 @@ New in denoise:
 
 Two additions:
 
-**Version detection** — extract version markers from log content:
+**Version detection — but only at the granularity that matters.** Log output format is typically stable within major versions and shifts at major boundaries. Before creating per-minor-version pattern files, run an empirical check: do the existing NOISE_PATTERNS produce different `unknown_pct` on Ansible 2.14 vs 2.16 logs? On OCP 4.14 vs 4.16 must-gather output? If `unknown_pct` is stable across minor versions (expected), one pattern file per major version is sufficient. Only split when observed divergence warrants it.
+
+Version markers to extract (for metadata, not necessarily for pattern routing):
 
 | Domain | Version signal |
 |--------|---------------|
-| Ansible | `ansible-playbook [core 2.16.x]` in header, `ansible.builtin.` vs bare module names |
-| OpenShift | `openshift-apiserver v4.14.x`, API resource versions |
+| Ansible | `ansible-playbook [core 2.x.y]` in header |
+| OpenShift | `openshift-apiserver v4.x.y`, API resource versions |
 | CI/CD | `Runner v2.x`, `Jenkins 2.x`, `GitLab Runner x.y` in preamble |
 | systemd | `systemd[1]: systemd 252` or similar in early boot lines |
 
@@ -162,33 +164,28 @@ from denoise import classify_log
 
 result = classify_log(text)
 # [
-#   {"domain": "cicd", "version": "gha-2.x", "range": (0, 5000)},
-#   {"domain": "ansible", "version": "2.16", "range": (5001, 45000)},
-#   {"domain": "mustgather", "version": "ocp-4.14", "range": (45001, 80000)},
+#   {"domain": "cicd", "range": (0, 5000)},
+#   {"domain": "ansible", "range": (5001, 45000)},
+#   {"domain": "mustgather", "range": (45001, 80000)},
 # ]
 ```
 
-Each segment gets its version-appropriate pattern set. Unknown segments fall through to the general-purpose `core.py` cleaner.
+Each segment gets its domain pattern set. Unknown segments fall through to the general-purpose `core.py` cleaner.
 
 ### Pattern Set Storage
+
+Start with one pattern file per domain. Only create version-specific files when empirical divergence is observed (unknown_pct difference > 5% between versions on the same domain).
 
 ```
 denoise/
   patterns/
-    ansible/
-      default.json      # hand-authored baseline
-      2.14.json          # discovered from 2.14 corpus
-      2.16.json          # discovered from 2.16 corpus
-    mustgather/
-      default.json
-      ocp-4.14.json
+    ansible.json        # covers all 2.x — split only if versions diverge
+    mustgather.json     # covers all OCP 4.x
     cicd/
-      gha.json
+      gha.json          # CI systems differ structurally, not by version
       jenkins.json
       gitlab.json
-    journald/
-      default.json
-      rhel-9.json
+    journald.json       # covers all systemd versions
 ```
 
 ## Phase 3: Live Drift Detection and Re-derivation
