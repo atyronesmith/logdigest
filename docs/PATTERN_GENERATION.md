@@ -49,27 +49,43 @@ line_counts = Counter(line.strip() for doc in corpus for line in doc.splitlines(
 # Shannon entropy of this distribution → low = dominated by few patterns = good candidate
 ```
 
-**Operation 2: Prefix-cluster compactness.** Group lines by shared prefix (longest common prefix ≥ 8 chars). For each cluster, measure within-cluster variance on the suffix. Tight clusters (low suffix variance, high member count) indicate an invariant template with a variable tail — exactly what becomes a regex. This is the operation that discovers patterns.
+**Operation 2: Log template mining via Drain3.** Line-level template discovery is a solved problem. [Drain3](https://github.com/logpai/Drain3) (logpai) is the standard: it parses log lines into a fixed-depth tree by token position, clusters lines into templates, and extracts the invariant structure with `<*>` wildcards for variable parts. It's streaming, unsupervised, and production-deployed.
+
+We use Drain3 as the Level 1 clustering engine rather than building our own prefix-clustering. Drain3 produces templates like `ok: [<*>]` and `FAILED - RETRYING: [<*>]: <*> (<*> retries left)`. These templates become the noise/signal pattern candidates — high-frequency templates are noise candidates, low-frequency templates containing error tokens are signal candidates.
 
 ```python
-# Prefix clustering: group "ok: [host1]", "ok: [host2]", ... → prefix "ok: ["
-# Low suffix variance + high frequency → noise candidate
-# High suffix variance or low frequency → not a template, skip
+from drain3 import TemplateMiner
+
+miner = TemplateMiner()
+for doc in corpus:
+    for line in doc.splitlines():
+        miner.add_log_message(line.strip())
+
+# High-frequency templates → noise candidates
+# Low-frequency templates with error tokens → signal candidates
+for cluster in miner.drain.clusters:
+    template = cluster.get_template()
+    frequency = cluster.size / total_lines
 ```
 
-**Operation 3: Character-level entropy per line.** Shannon entropy of the character distribution within a single line. Only useful as a filter for two edge cases: separator lines (`==========`, entropy ≈ 0) and base64/hex blobs (entropy ≈ 5.5+). Not a primary signal for pattern discovery.
+**What Drain3 doesn't do — and where denoise adds value:**
 
-Lines are classified as noise candidates when they belong to high-frequency, low-variance prefix clusters (Operation 2) within a corpus that has low line-frequency entropy (Operation 1). Lines are classified as signal candidates when they appear rarely and contain known error tokens (fatal, error, failed, panic, traceback).
+- **Block patterns (Level 2):** Drain3 operates on individual lines. It cannot detect that 47 consecutive `FAILED - RETRYING:` lines form a retry block that should collapse into `[RETRY: task, 47 retries, then succeeded]`. Block detection requires sequence-level analysis across lines.
+- **Blob patterns (Level 3):** Drain3 doesn't identify multi-kilobyte embedded structures (K8s API responses, base64 blobs, managedFields YAML) that should be truncated to one-line summaries.
+- **Noise/signal classification:** Drain3 discovers templates but doesn't classify them. The classification step (is this template noise or signal?) uses corpus-level line-frequency entropy from Operation 1 plus error-token heuristics.
+- **Domain-specific block/blob detectors:** Retry loop collapsing, item loop dedup, health-check block summarization, JSON blob truncation — these are denoise's contribution on top of Drain3's line-level templates.
 
-### Step 2: Candidate Regex Generation
+**Operation 3: Character-level entropy per line.** Shannon entropy of the character distribution within a single line. Only useful as a filter for two edge cases: separator lines (`==========`, entropy near 0) and base64/hex blobs (entropy near 5.5+). Not a primary signal for pattern discovery.
 
-For each prefix cluster identified in Step 1, generate a regex:
+### Step 2: Template-to-Regex Conversion
 
-1. **Exact match clusters** — all members identical → literal pattern (e.g., `^TASKS RECAP$`)
-2. **Prefix-variable clusters** — shared prefix with variable suffix → prefix regex (e.g., `^ok: \[` captures `ok: [host1]`, `ok: [host2]`, ...)
-3. **Structural template clusters** — members share a structural template (e.g., timestamp + level + message) but vary in multiple positions → templated regex with capture groups for the invariant structure
+Drain3 emits templates with `<*>` wildcards (e.g., `ok: [<*>]`). Convert these to compiled regex:
 
-The generation follows drift's `autogen._generate_regex()` approach: extract the invariant prefix/structure from the cluster, parameterize variable positions, validate the generated regex against all cluster members and against the full corpus.
+1. **Exact templates** (no wildcards) → literal pattern (e.g., `^TASKS RECAP$`)
+2. **Prefix-wildcard templates** → prefix regex (e.g., `ok: [<*>]` → `^ok: \[`)
+3. **Multi-wildcard templates** → structural regex with `.*?` or `\S+` at wildcard positions, following drift's `autogen._generate_regex()` for escaping and anchoring
+
+Each generated regex is validated against all members of the Drain3 cluster it came from, plus cross-checked against signal clusters to prevent false matches.
 
 ### Step 3: Validation
 
