@@ -14,10 +14,13 @@ from pathlib import Path
 
 from logdigest.domain_base import (
     PatternSet,
-    classify_line as _classify_line,
-    analyze_file as _analyze_file,
-    find_large_blobs,
     predigest_stream,
+)
+from logdigest.domain_base import (
+    analyze_file as _analyze_file,
+)
+from logdigest.domain_base import (
+    classify_line as _classify_line,
 )
 
 # ---------------------------------------------------------------------------

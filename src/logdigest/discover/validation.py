@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 
 from logdigest.discover.classifier import CandidatePattern
@@ -31,10 +32,8 @@ def validate_patterns(
     signal_regexes: list[re.Pattern] = []
     for c in candidates:
         if c.classification == "signal":
-            try:
+            with contextlib.suppress(re.error):
                 signal_regexes.append(re.compile(c.regex))
-            except re.error:
-                pass
 
     validated: list[CandidatePattern] = []
 

@@ -57,10 +57,7 @@ def generate_label(template: str, existing_labels: set[str] | None = None) -> st
     words = _WORD_RE.findall(clean)
     significant = [w.lower() for w in words if w.lower() not in _SKIP_WORDS]
 
-    if not significant:
-        base = "pattern"
-    else:
-        base = "_".join(significant[:3])
+    base = "pattern" if not significant else "_".join(significant[:3])
 
     # Truncate
     base = base[:30]

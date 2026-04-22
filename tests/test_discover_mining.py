@@ -6,7 +6,7 @@ import pytest
 
 drain3 = pytest.importorskip("drain3")
 
-from logdigest.discover.mining import mine_templates, TemplateCluster
+from logdigest.discover.mining import mine_templates  # noqa: E402
 
 
 class TestMineTemplates:
@@ -75,7 +75,6 @@ class TestMineTemplates:
             + ["PLAY RECAP"] * 10
         )
         clusters = mine_templates(lines)
-        templates = [c.template for c in clusters]
         # Should discover "ok: [<*>]" as a high-frequency template
         ok_clusters = [c for c in clusters if "ok" in c.template.lower()]
         assert len(ok_clusters) >= 1

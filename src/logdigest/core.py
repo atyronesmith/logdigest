@@ -5,8 +5,23 @@ fully corpus-driven. They follow the same rules as lossless compression:
 identify redundancy and eliminate it.
 """
 
+from __future__ import annotations
+
 from collections import Counter
 from hashlib import md5
+from typing import TypedDict
+
+
+class CorpusStats(TypedDict):
+    """Stats returned by :func:`predigest_corpus`."""
+
+    duplicates_removed: int
+    boilerplate_lines: int
+    boilerplate_threshold: float
+    boilerplate_skipped: bool
+    raw_chars: int
+    digest_chars: int
+    char_reduction_pct: float
 
 SEPARATOR_PATTERN_CHARS = set("*=-_~#.+")
 
@@ -27,6 +42,10 @@ def build_boilerplate_set(
 
     These are cross-document boilerplate (headers, footers, disclaimers).
     Only considers lines >20 chars to avoid matching blank/trivial lines.
+
+    Returns an empty set when the corpus has fewer than 10 documents,
+    since boilerplate detection needs enough samples to distinguish
+    recurring lines from coincidence.
     """
     n_docs = len(documents)
     if n_docs < 10:
@@ -109,13 +128,16 @@ def predigest_corpus(
     documents: list[str],
     threshold: float = 0.05,
     dedup: bool = True,
-) -> tuple[list[str], dict]:
+) -> tuple[list[str], CorpusStats]:
     """Pre-digest an entire corpus. Returns (digested_docs, stats).
 
     Convenience function that runs the full pipeline:
     1. Deduplicate documents (optional)
-    2. Detect corpus-level boilerplate
+    2. Detect corpus-level boilerplate (requires >= 10 docs)
     3. Pre-digest each document
+
+    Stats includes ``boilerplate_skipped: True`` when the corpus
+    is too small for reliable boilerplate detection.
     """
     stats: dict = {}
 
@@ -128,6 +150,7 @@ def predigest_corpus(
     boilerplate = build_boilerplate_set(documents, threshold)
     stats["boilerplate_lines"] = len(boilerplate)
     stats["boilerplate_threshold"] = threshold
+    stats["boilerplate_skipped"] = len(documents) < 10
 
     raw_chars = sum(len(d) for d in documents)
     digested = [predigest_document(doc, boilerplate) for doc in documents]

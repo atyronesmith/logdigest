@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from logdigest.discover.classifier import CandidatePattern
@@ -34,7 +34,7 @@ def export_pattern_set(
 
     data: dict = {
         "domain": domain,
-        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "corpus_size": corpus_size,
         "noise_patterns": [_pattern_entry(c) for c in sorted_noise],
         "signal_patterns": [_pattern_entry(c) for c in sorted_signal],

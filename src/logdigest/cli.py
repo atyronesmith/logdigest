@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ except ImportError:
         "Install with: pip install logdigest[discover]",
         file=sys.stderr,
     )
-    raise SystemExit(1)
+    raise SystemExit(1) from None
 
 
 @click.group()
@@ -41,7 +42,7 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
             "Install with: pip install logdigest[discover]",
             err=True,
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     from logdigest.discover.classifier import (
         CandidatePattern,
@@ -65,10 +66,8 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
 
     documents = []
     for f in files:
-        try:
+        with contextlib.suppress(OSError):
             documents.append(f.read_text(errors="replace"))
-        except OSError:
-            pass
 
     click.echo(f"Corpus: {len(documents)} files")
 

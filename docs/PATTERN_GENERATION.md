@@ -1,6 +1,6 @@
 # Automated Pattern Generation
 
-## Status: Plan
+## Status: Phase 1b Complete
 
 The current NOISE_PATTERNS and SIGNAL_PATTERNS in each domain module are hand-authored by domain experts examining log samples. This document describes the pipeline to automate pattern discovery, version-aware routing, and live updates.
 
@@ -155,18 +155,18 @@ The loader additionally validates that every `regex` field compiles successfully
 
 ### Implementation
 
-New in drift:
-
-```
-drift discover <corpus_dir> --domain ansible -o patterns.json
+```bash
+logdigest discover <corpus_dir> --domain ansible -o patterns.json
 ```
 
-Pipeline: `corpus_entropy` → line frequency analysis → prefix clustering → regex generation → validation → export.
+Pipeline: corpus loading → entropy pre-flight → train/test split → Drain3 mining → template-to-regex → noise/signal classification → conflict resolution → held-out validation → export.
 
-New in logdigest:
+Implementation:
 
-- `PatternSet` class in `domain_base.py` that loads from JSON or falls back to compiled defaults
-- Each domain module switches from `NOISE_PATTERNS = [...]` to `NOISE_PATTERNS = PatternSet.load("ansible")`
+- `logdigest discover` CLI command in `src/logdigest/cli.py` (Click-based)
+- Discovery pipeline in `src/logdigest/discover/` subpackage (mining, regex_convert, classifier, validation, export)
+- `PatternSet` class in `domain_base.py` loads from JSON with schema validation
+- Each domain module uses `PatternSet.load("ansible")` instead of hardcoded lists
 
 **Version resolution in `PatternSet.load(domain, version=None)`:**
 
@@ -260,7 +260,7 @@ class DigestStats:
 - **Stale patterns**: unknown_pct rises as new log format lines go unclassified
 - **Major version change**: unknown_pct spikes — many new patterns the classifier hasn't seen
 
-Denoise buffers unclassified lines in a rolling window. When `unknown_pct` crosses the threshold (default 0.25), it triggers the escalation path.
+logdigest buffers unclassified lines in a rolling window. When `unknown_pct` crosses the threshold (default 0.25), it triggers the escalation path.
 
 ### Escalation: Logprob Confirmation (expensive, on-demand only)
 
@@ -404,8 +404,8 @@ manager = PatternManager(
 
 ## Implementation Order
 
-1. **Phase 1a** — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in logdigest (patterns still hand-authored, but externalized from Python source)
-2. **Phase 1b** — `drift discover` command (corpus → pattern JSON)
+1. **Phase 1a** ✅ — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in logdigest (patterns still hand-authored, but externalized from Python source)
+2. **Phase 1b** ✅ — `logdigest discover` command (corpus → pattern JSON). Lives in logdigest, not drift, so discovery can eventually run continuously without depending on the experiment harness.
 3. **Phase 1c** — Re-derive current hand-authored patterns via the pipeline, proving the loop works
 4. **Phase 2a** — Version detection in `classify_log()`
 5. **Phase 2b** — Version-specific pattern sets (start with Ansible 2.14 vs 2.16)

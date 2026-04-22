@@ -15,9 +15,54 @@ import warnings
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar, Protocol, TypedDict, runtime_checkable
 
 # Type alias for pattern lists used across all domain modules
 PatternList = list[tuple[re.Pattern, str]]
+
+
+class LineAnalysisStats(TypedDict):
+    """Stats returned by :func:`analyze_lines`."""
+
+    total_lines: int
+    noise_lines: int
+    signal_lines: int
+    unknown_lines: int
+    noise_pct: float
+    classifications: dict[str, int]
+
+
+class StreamStats(TypedDict):
+    """Stats returned by :func:`predigest_stream`."""
+
+    total_lines: int
+    noise_lines: int
+    signal_lines: int
+    kept_lines: int
+
+
+@runtime_checkable
+class DomainModule(Protocol):
+    """Contract that every domain module must satisfy.
+
+    Domain modules (ansible, mustgather, cicd, journald) all expose
+    this common interface. Domain-specific extras (e.g. cicd's
+    ``detect_ci_system``) are not part of the contract.
+    """
+
+    NOISE_PATTERNS: PatternList
+    SIGNAL_PATTERNS: PatternList
+
+    @staticmethod
+    def classify_line(line: str) -> str: ...
+    @staticmethod
+    def predigest(text: str, **kwargs: object) -> str: ...
+    @staticmethod
+    def predigest_file(filepath: Path) -> str: ...
+    @staticmethod
+    def predigest_file_streaming(filepath: Path) -> str: ...
+    @staticmethod
+    def analyze_log(filepath: Path) -> dict: ...
 
 
 @dataclass
@@ -71,8 +116,8 @@ def collapse_blocks(lines: list[str], detectors: list[BlockConfig]) -> list[str]
 class PatternSet:
     """Load and cache pattern sets from JSON files."""
 
-    _cache: dict[tuple[str, str | None], PatternSet | None] = {}
-    _schema: dict | None = None
+    _cache: ClassVar[dict[tuple[str, str | None], PatternSet | None]] = {}
+    _schema: ClassVar[dict | None] = None
 
     def __init__(
         self,
@@ -170,11 +215,11 @@ class PatternSet:
         resource = patterns_pkg.joinpath(filename)
         try:
             raw = resource.read_text(encoding="utf-8")
-        except (FileNotFoundError, TypeError):
+        except (FileNotFoundError, TypeError) as exc:
             if version is not None and version != "latest":
                 raise FileNotFoundError(
                     f"Pattern file not found: {filename}"
-                )
+                ) from exc
             return None
 
         data = json.loads(raw)
@@ -282,12 +327,8 @@ def analyze_lines(
     lines: list[str],
     noise_patterns: PatternList,
     signal_patterns: PatternList,
-) -> dict:
-    """Produce noise/signal/unknown statistics for a line list.
-
-    Returns dict with total_lines, noise_lines, signal_lines,
-    unknown_lines, noise_pct, and per-label classification counts.
-    """
+) -> LineAnalysisStats:
+    """Produce noise/signal/unknown statistics for a line list."""
     total = len(lines)
     classifications: Counter[str] = Counter()
     for line in lines:
@@ -328,7 +369,7 @@ def predigest_stream(
     error_context: int = 3,
     max_line_len: int = 500,
     blob_handler=None,
-) -> dict:
+) -> StreamStats:
     """Streaming pre-digestion for arbitrarily large files.
 
     Reads lines from source (file object or iterable), writes to sink
@@ -345,11 +386,8 @@ def predigest_stream(
         blob_handler: Optional callable(line) -> str|None. If it
             returns a string, that replaces the line. If None, long
             lines pass through.
-
-    Returns:
-        Dict with total_lines, noise_lines, signal_lines, kept_lines.
     """
-    write = sink.append if isinstance(sink, list) else lambda l: sink.write(l + "\n")
+    write = sink.append if isinstance(sink, list) else lambda line: sink.write(line + "\n")
 
     buffer: list[tuple[str, str]] = []  # (line, classification)
     stats = {"total_lines": 0, "noise_lines": 0, "signal_lines": 0, "kept_lines": 0}
@@ -358,11 +396,7 @@ def predigest_stream(
         """Flush buffer entries, keeping context around errors."""
         for idx, (line, cls) in enumerate(buffer[:up_to]):
             keep = False
-            if cls.startswith("signal:"):
-                keep = True
-            elif error_at is not None and abs(idx - error_at) <= error_context:
-                keep = True
-            elif not cls.startswith("noise:"):
+            if cls.startswith("signal:") or (error_at is not None and abs(idx - error_at) <= error_context) or not cls.startswith("noise:"):
                 keep = True
 
             if keep:

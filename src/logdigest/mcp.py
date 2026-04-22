@@ -13,14 +13,18 @@ Usage:
 
 from __future__ import annotations
 
+import importlib.resources
+import logging
+from typing import TYPE_CHECKING
+
 from fastmcp import FastMCP
 
-from logdigest.ansible import predigest as ansible_predigest
-from logdigest.mustgather import predigest as mustgather_predigest
-from logdigest.cicd import predigest as cicd_predigest, detect_ci_system
-from logdigest.journald import predigest as journald_predigest
-from logdigest.entropy import corpus_entropy, entropy_report
-from logdigest.domain_base import PatternSet
+from logdigest.entropy import entropy_report
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_log = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "logdigest",
@@ -32,25 +36,66 @@ mcp = FastMCP(
     ),
 )
 
-# Domain detection keywords — loaded from JSON config
-_DOMAIN_SIGNATURES = [
-    (_domain, PatternSet.load(_domain).domain_keywords)
-    for _domain in ["ansible", "cicd", "journald", "mustgather"]
-]
+_domain_signatures: list[tuple[str, list[str]]] | None = None
+_digesters: dict[str, Callable[[str], str]] | None = None
 
-_DIGESTERS = {
-    "ansible": ansible_predigest,
-    "mustgather": mustgather_predigest,
-    "cicd": cicd_predigest,
-    "journald": journald_predigest,
-}
+
+def _discover_domain_names() -> list[str]:
+    """Auto-discover domains from pattern JSON files in the package."""
+    patterns_pkg = importlib.resources.files("logdigest.patterns")
+    names = []
+    for item in patterns_pkg.iterdir():
+        name = item.name if hasattr(item, "name") else str(item)
+        if name.endswith(".json") and "@" not in name:
+            names.append(name.removesuffix(".json"))
+    return sorted(names)
+
+
+def _load_domains() -> None:
+    """Lazy-load domain modules and signatures, skipping broken domains."""
+    global _domain_signatures, _digesters
+    if _domain_signatures is not None:
+        return
+
+    import importlib
+
+    from logdigest.domain_base import DomainModule, PatternSet
+
+    sigs: list[tuple[str, list[str]]] = []
+    funcs: dict[str, Callable[[str], str]] = {}
+
+    for name in _discover_domain_names():
+        try:
+            mod = importlib.import_module(f"logdigest.{name}")
+        except ImportError:
+            _log.debug("No module logdigest.%s for pattern file — skipping", name)
+            continue
+        except Exception:
+            _log.warning("Failed to load domain %s — skipping", name, exc_info=True)
+            continue
+
+        if not isinstance(mod, DomainModule):
+            _log.debug("logdigest.%s does not satisfy DomainModule — skipping", name)
+            continue
+
+        try:
+            ps = PatternSet.load(name)
+            funcs[name] = mod.predigest
+            if ps is not None:
+                sigs.append((name, ps.domain_keywords))
+        except Exception:
+            _log.warning("Failed to load patterns for %s — skipping", name, exc_info=True)
+
+    _domain_signatures = sigs
+    _digesters = funcs
 
 
 def _detect_domain(text: str) -> str | None:
     """Detect which domain module best fits the log text."""
+    _load_domains()
     first_chunk = text[:5000]
     scores: dict[str, int] = {}
-    for domain, keywords in _DOMAIN_SIGNATURES:
+    for domain, keywords in _domain_signatures:
         score = sum(1 for kw in keywords if kw in first_chunk)
         if score > 0:
             scores[domain] = score
@@ -59,8 +104,7 @@ def _detect_domain(text: str) -> str | None:
     return max(scores, key=scores.get)
 
 
-@mcp.tool()
-def predigest(text: str, domain: str | None = None) -> str:
+def predigest_impl(text: str, domain: str | None = None) -> str:
     """Pre-digest log text by removing noise and preserving errors/signal.
 
     Strips health checks, dependency installs, boilerplate, and other
@@ -81,18 +125,17 @@ def predigest(text: str, domain: str | None = None) -> str:
     if domain is None:
         domain = _detect_domain(text)
 
-    digester = _DIGESTERS.get(domain) if domain else None
+    _load_domains()
+    digester = _digesters.get(domain) if domain else None
 
     if digester:
         return digester(text)
 
-    # Fallback: apply general-purpose cleaning
     from logdigest.core import predigest_document
     return predigest_document(text)
 
 
-@mcp.tool()
-def detect_domain(text: str) -> str:
+def detect_domain_impl(text: str) -> str:
     """Detect which log domain a text sample belongs to.
 
     Examines the content for domain-specific markers and returns
@@ -109,6 +152,57 @@ def detect_domain(text: str) -> str:
     return result or "unknown"
 
 
+def entropy_check_impl(texts: list[str]) -> str:
+    """Check whether a corpus of documents would benefit from pre-digestion.
+
+    Measures redundancy across the provided documents and predicts
+    the impact of building or applying pre-digestion.
+
+    Args:
+        texts: List of document/log texts to analyze.
+
+    Returns:
+        Human-readable entropy report with impact prediction.
+    """
+    return entropy_report(texts)
+
+
+@mcp.tool()
+def predigest(text: str, domain: str | None = None) -> str:
+    """Pre-digest log text by removing noise and preserving errors/signal.
+
+    Strips health checks, dependency installs, boilerplate, and other
+    low-information content. Keeps errors, failures, panics, and context
+    around them. Typically reduces token count by 60-85%.
+
+    Args:
+        text: Raw log content (from oc logs, journalctl, CI/CD output, etc.)
+        domain: Optional domain hint. One of "ansible", "mustgather",
+            "cicd", "journald". Auto-detected if not provided.
+
+    Returns:
+        Cleaned log text with noise removed.
+    """
+    return predigest_impl(text, domain)
+
+
+@mcp.tool()
+def detect_domain(text: str) -> str:
+    """Detect which log domain a text sample belongs to.
+
+    Examines the content for domain-specific markers and returns
+    the best-matching domain module name.
+
+    Args:
+        text: Log content to classify.
+
+    Returns:
+        Domain name ("ansible", "mustgather", "cicd", "journald")
+        or "unknown" if no domain matches.
+    """
+    return detect_domain_impl(text)
+
+
 @mcp.tool()
 def entropy_check(texts: list[str]) -> str:
     """Check whether a corpus of documents would benefit from pre-digestion.
@@ -122,7 +216,7 @@ def entropy_check(texts: list[str]) -> str:
     Returns:
         Human-readable entropy report with impact prediction.
     """
-    return entropy_report(texts)
+    return entropy_check_impl(texts)
 
 
 def main():

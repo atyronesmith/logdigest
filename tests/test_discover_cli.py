@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 drain3 = pytest.importorskip("drain3")
 click = pytest.importorskip("click")
 
-from click.testing import CliRunner
+from click.testing import CliRunner  # noqa: E402
 
-from logdigest.cli import cli
+from logdigest.cli import cli  # noqa: E402
 
 
 @pytest.fixture
@@ -100,7 +99,7 @@ class TestDiscoverCLI:
         data = json.loads(output_path.read_text())
         # Should find "fatal" as a signal
         signal_labels = [p["label"] for p in data["signal_patterns"]]
-        assert any("fatal" in l for l in signal_labels)
+        assert any("fatal" in label for label in signal_labels)
 
     def test_empty_corpus(self, tmp_path):
         runner = CliRunner()

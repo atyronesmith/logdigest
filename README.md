@@ -22,15 +22,15 @@ pip install "logdigest[rag]"
 ## Quick Start
 
 ```python
-from logdigest import predigest_document, build_boilerplate_set, dedup_documents
+from logdigest import predigest_document, predigest_corpus
 
 # Clean a single document
 cleaned = predigest_document(text)
 
-# Corpus-level pipeline
+# Corpus-level pipeline (dedup + boilerplate + per-doc cleaning)
 docs = ["doc1 text", "doc2 text", ...]
-boilerplate = build_boilerplate_set(docs)
-unique_docs = dedup_documents(docs)
+digested, stats = predigest_corpus(docs)
+# stats["char_reduction_pct"], stats["boilerplate_lines"], etc.
 ```
 
 For domain-specific logs:
@@ -61,6 +61,26 @@ result = corpus_entropy(my_documents)
 # result["predicted_impact"]  → "high" / "medium" / "low" / "none"
 # result["recommendation"]    → human-readable guidance
 ```
+
+## Pattern Discovery
+
+Automatically generate pattern sets from a corpus of logs using Drain3 template mining:
+
+```bash
+# Install with discovery support
+uv pip install -e ".[discover]"
+
+# Discover patterns from a corpus
+logdigest discover logs/ --domain ansible -o ansible_discovered.json
+
+# Use existing patterns as a reference (signal-always-wins conflict resolution)
+logdigest discover logs/ -d myapp -o myapp.json --reference ansible.json
+
+# Tune Drain3 parameters
+logdigest discover logs/ -d ansible --depth 6 --similarity 0.3 --min-frequency 0.005
+```
+
+The output is a JSON pattern set that can be loaded directly by `PatternSet.load_from_file()`. See [docs/PATTERN_GENERATION.md](docs/PATTERN_GENERATION.md) for the full pipeline design.
 
 ## MCP Server (Claude Code Integration)
 

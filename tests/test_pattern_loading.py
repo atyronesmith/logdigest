@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-import textwrap
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from logdigest.domain_base import BlockConfig, PatternSet, classify_line, collapse_blocks
+from logdigest.domain_base import BlockConfig, PatternSet, collapse_blocks
 
 
 @pytest.fixture(autouse=True)
@@ -105,6 +103,7 @@ class TestSchemaValidation:
     @pytest.mark.usefixtures("_require_jsonschema")
     def test_all_domains_valid(self):
         import importlib.resources
+
         import jsonschema
 
         schema_pkg = importlib.resources.files("logdigest.schemas")
@@ -121,8 +120,9 @@ class TestSchemaValidation:
 
     @pytest.mark.usefixtures("_require_jsonschema")
     def test_schema_rejects_bad_label(self):
-        import jsonschema
         import importlib.resources
+
+        import jsonschema
 
         schema_pkg = importlib.resources.files("logdigest.schemas")
         schema = json.loads(
@@ -138,9 +138,11 @@ class TestSchemaValidation:
             jsonschema.validate(bad_data, schema)
 
     def test_warns_without_jsonschema(self):
-        with patch.dict("sys.modules", {"jsonschema": None}):
-            with patch("builtins.__import__", side_effect=ImportError):
-                pass
+        with (
+            patch.dict("sys.modules", {"jsonschema": None}),
+            patch("builtins.__import__", side_effect=ImportError),
+        ):
+            pass
 
 
 # ── Pattern count sanity ─────────────────────────────────────────────

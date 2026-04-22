@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from logdigest.discover.classifier import (
-    CandidatePattern,
+    _has_error_token,
     classify_template,
     generate_label,
-    _has_error_token,
 )
 from logdigest.discover.mining import TemplateCluster
 

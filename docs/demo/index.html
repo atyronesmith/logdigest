@@ -80,7 +80,7 @@
   .tab-content.active { position: static; visibility: visible; }
 
   /* ============================== */
-  /* TAB 1: PRE-DIGESTION (denoise) */
+  /* TAB 1: PRE-DIGESTION (logdigest) */
   /* ============================== */
 
   .diagram {
@@ -185,7 +185,7 @@
   .output-panel .panel-label { color: #7ee787; }
   .output-panel .badge { background: #12301a; color: #7ee787; }
 
-  .denoise-col {
+  .logdigest-col {
     width: 140px;
     background: #1e293b;
     display: flex;
@@ -197,14 +197,14 @@
     padding: 16px 10px;
     gap: 12px;
   }
-  .denoise-col .engine-label {
+  .logdigest-col .engine-label {
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
     color: #d2a8ff;
   }
-  .denoise-col .engine-icon { font-size: 2rem; }
+  .logdigest-col .engine-icon { font-size: 2rem; }
 
   .tier-list {
     list-style: none;
@@ -576,7 +576,7 @@
   @media (max-width: 768px) {
     .log-sources { grid-template-columns: repeat(2, 1fr); }
     .panels { grid-template-columns: 1fr; }
-    .denoise-col {
+    .logdigest-col {
       width: 100%;
       flex-direction: row;
       border-left: none;
@@ -662,7 +662,7 @@
             </div>
             <div class="log-lines" id="input-log"></div>
           </div>
-          <div class="denoise-col">
+          <div class="logdigest-col">
             <div class="engine-label">logdigest</div>
             <div class="engine-icon">&#x1F9F9;</div>
             <ul class="tier-list">
@@ -919,7 +919,7 @@ function switchTab(tabId) {
 }
 </script>
 
-<!-- Denoise animation (inline) -->
+<!-- logdigest animation (inline) -->
 <script>
 const DOMAINS = {
   mustgather: {

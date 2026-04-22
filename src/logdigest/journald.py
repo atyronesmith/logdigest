@@ -16,9 +16,13 @@ from pathlib import Path
 
 from logdigest.domain_base import (
     PatternSet,
-    classify_line as _classify_line,
-    analyze_file as _analyze_file,
     predigest_stream,
+)
+from logdigest.domain_base import (
+    analyze_file as _analyze_file,
+)
+from logdigest.domain_base import (
+    classify_line as _classify_line,
 )
 
 # ---------------------------------------------------------------------------
@@ -175,7 +179,6 @@ def predigest(text: str, keep_timestamps: bool = False) -> str:
 
         # Level 3: Truncate large stack traces (keep first and last 5 lines)
         if "Call Trace:" in stripped:
-            trace_start = i
             trace_lines = [line]
             i += 1
             while i < len(lines) and (
