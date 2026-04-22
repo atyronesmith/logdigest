@@ -80,6 +80,16 @@ _ERROR_CONTEXT = _ps.error_context if _ps else 5
 _MAX_LINE_LEN = _ps.max_line_len if _ps else 500
 _STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
 
+_FALLBACK_BLOB_MARKERS = [
+    "'metadata':",
+    '"metadata":',
+    "'spec':",
+    '"spec":',
+    "fieldsV1",
+]
+
+ANSIBLE_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
+
 
 def classify_line(line: str) -> str:
     """Classify a single log line as noise, signal, or unknown."""
@@ -176,7 +186,7 @@ def predigest(text: str) -> str:
         stripped = line.strip()
         if (stripped.startswith("fatal:") or stripped.startswith("FAILED!")
                 or stripped.startswith("failed:") or "UNREACHABLE!" in stripped):
-            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
@@ -243,17 +253,6 @@ def predigest(text: str) -> str:
         i += 1
 
     return "\n".join(output)
-
-
-_FALLBACK_BLOB_MARKERS = [
-    "'metadata':",
-    '"metadata":',
-    "'spec':",
-    '"spec":',
-    "fieldsV1",
-]
-
-ANSIBLE_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
 
 
 def _blob_handler(line: str) -> str | None:
