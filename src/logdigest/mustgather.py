@@ -1,13 +1,12 @@
 """OpenShift must-gather pre-digestion: cluster diagnostic noise removal.
 
-Must-gather bundles contain pod logs, event JSONs, resource YAMLs, and
-operator logs. 80-90% is boilerplate — health checks, leader election
-renewals, informer syncs, and full K8s API response blobs.
+Patterns, block detectors, and thresholds are loaded from
+patterns/mustgather.json at import time, with hardcoded fallbacks.
 
 Three levels of compression:
-1. Line-level: strip noise lines (health checks, leader election, informer sync)
-2. Block-level: collapse repeated patterns into summaries
-3. Blob-level: truncate K8s API responses, managedFields, large ConfigMaps
+1. Line-level: classify lines as noise/signal via regex patterns
+2. Block-level: collapse health checks, leader election, managedFields
+3. Blob-level: truncate K8s API responses and large embedded data
 """
 
 from __future__ import annotations

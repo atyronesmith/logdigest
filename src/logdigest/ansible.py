@@ -1,11 +1,10 @@
 """Ansible log pre-digestion: domain-specific noise removal.
 
-Ansible job logs are 70-90% noise — ok/skipping/changed lines, retry
-blocks, item loops, and embedded K8s API responses. This module strips
-all of it, preserving only error context and play structure.
+Patterns and thresholds are loaded from patterns/ansible.json at
+import time, with hardcoded fallbacks if the JSON is missing.
 
 Three levels of compression:
-1. Line-level: strip noise lines (ok, skipping, changed, timestamps, etc.)
+1. Line-level: classify lines as noise/signal via regex patterns
 2. Block-level: collapse retry blocks and item loops into summaries
 3. Blob-level: truncate large embedded data (K8s API responses, base64)
 """

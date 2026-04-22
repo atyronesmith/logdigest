@@ -1,13 +1,12 @@
-"""Systemd journal pre-digestion: system log noise removal.
+"""Systemd journal pre-digestion: journalctl noise removal.
 
-journalctl output has per-entry boilerplate (timestamp, hostname, PID,
-facility) and massive noise from routine system operations — DHCP
-renewals, session management, cron execution, kernel informational.
+Patterns, block detectors, and thresholds are loaded from
+patterns/journald.json at import time, with hardcoded fallbacks.
 
 Three levels of compression:
-1. Line-level: strip noise lines (routine kernel, systemd, audit)
+1. Line-level: classify lines as noise/signal via regex patterns
 2. Block-level: collapse service restart loops, audit bursts
-3. Blob-level: truncate large kernel dmesg dumps, stack traces
+3. Blob-level: truncate large stack traces
 """
 
 from __future__ import annotations

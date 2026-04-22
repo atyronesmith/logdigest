@@ -1,14 +1,12 @@
-"""CI/CD log pre-digestion: build/deploy noise removal.
+"""CI/CD log pre-digestion: GitHub Actions, Jenkins, GitLab CI.
 
-GitHub Actions, Jenkins, and GitLab CI logs are 70-90% noise —
-dependency installation, download progress, container pulls, and
-cache operations. This module strips all of it, preserving only
-errors, test failures, and build output.
+Patterns and thresholds are loaded from patterns/cicd.json at
+import time, with hardcoded fallbacks if the JSON is missing.
 
 Three levels of compression:
-1. Line-level: strip noise lines (installs, downloads, cache ops)
-2. Block-level: collapse repeated patterns into summaries
-3. Blob-level: truncate large dependency trees and build stats
+1. Line-level: classify lines as noise/signal via regex patterns
+2. Block-level: collapse install blocks and container pull sequences
+3. Blob-level: truncate large dependency trees
 """
 
 from __future__ import annotations
