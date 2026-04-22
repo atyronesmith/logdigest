@@ -21,73 +21,20 @@ from logdigest.domain_base import (
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-_FALLBACK_NOISE = [
-    (re.compile(r"^ok: \["), "ok"),
-    (re.compile(r"^skipping: \["), "skipping"),
-    (re.compile(r"^changed: \["), "changed"),
-    (re.compile(r"^included: "), "included"),
-    (re.compile(r"^\w+day \d{2} \w+ \d{4}\s+\d{2}:\d{2}:\d{2}"), "timestamp"),
-    (re.compile(r"^Starting galaxy (role|collection) install"), "galaxy"),
-    (re.compile(r"^- (downloading|extracting|installing) role"), "galaxy"),
-    (re.compile(r"^Process install dependency map"), "galaxy"),
-    (re.compile(r"^(Starting|Rewriting) requirements"), "galaxy"),
-    (re.compile(r"^Vault password"), "vault"),
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^FAILED - RETRYING:"), "retry"),
-    (re.compile(r"^[\w_\- :]+ -{3,} \d+\.\d+s$"), "recap_timing"),
-    (re.compile(r"^\[DEPRECATION WARNING\]"), "deprecation"),
-    (re.compile(r"^This feature will be removed"), "deprecation"),
-    (re.compile(r"^\[WARNING\]:"), "warning"),
-    (re.compile(r"^\}$"), "json_close"),
-    (re.compile(r"^\{$"), "json_open"),
-    (re.compile(r"^\},?$"), "json_close"),
-    (re.compile(r'^"changed": (true|false),?$'), "json_frag"),
-    (re.compile(r'^"msg": "(All assertions passed|Pre-Workload tasks completed|Workload Tasks completed|Post-Workload Tasks completed|Step \d+)'), "json_success_msg"),
-    (re.compile(r'^"ansible_loop_var"'), "json_frag"),
-    (re.compile(r'^"status": "CREATE_COMPLETE"'), "json_frag"),
-    (re.compile(r'^"status_reason": null'), "json_frag"),
-    (re.compile(r'^"data": \{'), "json_frag"),
-    (re.compile(r'^"group_id":'), "json_frag"),
-    (re.compile(r"^skipping: no hosts matched"), "no_hosts"),
-    (re.compile(r"already installed in EE"), "galaxy_ee"),
-    (re.compile(r"^={10,}"), "separator"),
-    (re.compile(r"^NO MORE HOSTS LEFT"), "no_hosts"),
-    (re.compile(r"^TASKS RECAP"), "recap"),
-    (re.compile(r'^"msg": "Starting CSV: "'), "json_frag"),
-]
-
-_FALLBACK_SIGNAL = [
-    (re.compile(r"^fatal: \["), "fatal"),
-    (re.compile(r"^FAILED!"), "failed"),
-    (re.compile(r"^ERROR"), "error"),
-    (re.compile(r"^PLAY \["), "play_header"),
-    (re.compile(r"^TASK \["), "task_header"),
-    (re.compile(r"^PLAY RECAP"), "play_recap"),
-    (re.compile(r"^    \"msg\":"), "error_msg"),
-    (re.compile(r"^    \"stderr\":"), "stderr"),
-    (re.compile(r"^    \"rc\":"), "return_code"),
-]
-
 _ps = PatternSet.load("ansible")
-NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
-SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/ansible.json")
 
-_ERROR_CONTEXT = _ps.error_context if _ps else 5
-_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
-_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+ANSIBLE_BLOB_MARKERS = _ps.blob_markers
 
-_FALLBACK_BLOB_MARKERS = [
-    "'metadata':",
-    '"metadata":',
-    "'spec':",
-    '"spec":',
-    "fieldsV1",
-]
-
-ANSIBLE_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
 
 
 def classify_line(line: str) -> str:

@@ -23,141 +23,19 @@ from logdigest.domain_base import (
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-# Shared across CI systems
-_COMMON_NOISE = [
-    # Blank / separator
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^-{5,}$"), "separator"),
-    (re.compile(r"^={5,}$"), "separator"),
-    (re.compile(r"^\*{5,}$"), "separator"),
-    # Download progress
-    (re.compile(r"Downloading .+\d+%"), "download_progress"),
-    (re.compile(r"Extracting .+\d+%"), "extract_progress"),
-    (re.compile(r"^\s*\d+(\.\d+)?%\s"), "progress_pct"),
-    (re.compile(r"Receiving objects:\s+\d+%"), "git_progress"),
-    (re.compile(r"Resolving deltas:\s+\d+%"), "git_progress"),
-    # pip install
-    (re.compile(r"^\s*Collecting\s"), "pip_install"),
-    (re.compile(r"^\s*Downloading\s.*\.whl"), "pip_install"),
-    (re.compile(r"^\s*Installing collected packages"), "pip_install"),
-    (re.compile(r"^\s*Successfully installed\s"), "pip_install"),
-    (re.compile(r"^\s*Using cached\s"), "pip_install"),
-    (re.compile(r"^\s*Requirement already satisfied"), "pip_install"),
-    (re.compile(r"^\s*Building wheel"), "pip_install"),
-    # npm install
-    (re.compile(r"^added \d+ packages"), "npm_install"),
-    (re.compile(r"^npm warn"), "npm_warn"),
-    (re.compile(r"^npm notice"), "npm_notice"),
-    (re.compile(r"^\s*npm http"), "npm_install"),
-    # apt/yum install
-    (re.compile(r"^\s*Setting up\s"), "apt_install"),
-    (re.compile(r"^\s*Unpacking\s"), "apt_install"),
-    (re.compile(r"^\s*Selecting previously"), "apt_install"),
-    (re.compile(r"^\s*Preparing to unpack"), "apt_install"),
-    (re.compile(r"^\s*Get:\d+"), "apt_install"),
-    (re.compile(r"^\s*Reading package lists"), "apt_install"),
-    (re.compile(r"^\s*Building dependency tree"), "apt_install"),
-    (re.compile(r"^\s*Installed:\s"), "yum_install"),
-    (re.compile(r"^\s*Installing\s*:"), "yum_install"),
-    (re.compile(r"^\s*Verifying\s*:"), "yum_install"),
-    # Container pulls
-    (re.compile(r"^\s*Pulling from\s"), "container_pull"),
-    (re.compile(r"^\s*Digest:\s"), "container_pull"),
-    (re.compile(r"^\s*Status: Downloaded"), "container_pull"),
-    (re.compile(r"^\s*(Waiting|Downloading|Extracting|Pull complete|Already exists)\s*$"), "container_layer"),
-    (re.compile(r"^\s*[a-f0-9]{12}: (Waiting|Downloading|Extracting|Pull complete|Already exists)"), "container_layer"),
-    # Cache operations
-    (re.compile(r"^\s*Cache (restored|saved|not found)", re.IGNORECASE), "cache_op"),
-    (re.compile(r"^\s*Post cache", re.IGNORECASE), "cache_op"),
-    (re.compile(r"^\s*Received \d+ of \d+"), "cache_op"),
-]
-
-# GitHub Actions specific
-_GITHUB_ACTIONS_NOISE = [
-    (re.compile(r"^##\[debug\]"), "gha_debug"),
-    (re.compile(r"^##\[group\]"), "gha_group"),
-    (re.compile(r"^##\[endgroup\]"), "gha_endgroup"),
-    (re.compile(r"^##\[command\]"), "gha_command"),
-    (re.compile(r"^\s*Syncing repository"), "gha_checkout"),
-    (re.compile(r"^\s*Deleting the contents"), "gha_checkout"),
-    (re.compile(r"^\s*Initializing the repository"), "gha_checkout"),
-    (re.compile(r"^\s*Fetching the repository"), "gha_checkout"),
-    (re.compile(r"^\s*Checking out\s"), "gha_checkout"),
-    (re.compile(r"^\s*\[command\]"), "gha_command"),
-]
-
-# Jenkins specific
-_JENKINS_NOISE = [
-    (re.compile(r"^\s*Started by\s"), "jenkins_start"),
-    (re.compile(r"^\s*Building on\s"), "jenkins_build"),
-    (re.compile(r"^\s*Building in\s"), "jenkins_build"),
-    (re.compile(r"^\s*Finished:\s"), "jenkins_finish"),
-    (re.compile(r"^\s*Polling SCM"), "jenkins_scm"),
-    (re.compile(r"^\s*SCM polling completed"), "jenkins_scm"),
-    (re.compile(r"^\s*Running on\s"), "jenkins_agent"),
-    (re.compile(r"^\s*Waiting for next available executor"), "jenkins_agent"),
-    (re.compile(r"^\s*\[Pipeline\]\s*(Start|End|node|stage|sh|echo)"), "jenkins_pipeline"),
-]
-
-# GitLab CI specific
-_GITLAB_CI_NOISE = [
-    (re.compile(r"^\s*Using Docker executor"), "gitlab_executor"),
-    (re.compile(r"^\s*Getting source from\s"), "gitlab_source"),
-    (re.compile(r"^\s*Checking out [a-f0-9]+ as"), "gitlab_checkout"),
-    (re.compile(r"^\s*Uploading artifacts"), "gitlab_artifacts"),
-    (re.compile(r"^\s*Uploading artifacts to coordinator"), "gitlab_artifacts"),
-    (re.compile(r"^\s*Restoring cache"), "gitlab_cache"),
-    (re.compile(r"^\s*Saving cache"), "gitlab_cache"),
-    (re.compile(r"^\s*\$ echo"), "gitlab_echo"),
-]
-
-_FALLBACK_NOISE = (
-    _COMMON_NOISE
-    + _GITHUB_ACTIONS_NOISE
-    + _JENKINS_NOISE
-    + _GITLAB_CI_NOISE
-)
-
-_FALLBACK_SIGNAL = [
-    # Exit codes
-    (re.compile(r"Process completed with exit code [1-9]"), "exit_code"),
-    (re.compile(r"exit code [1-9]"), "exit_code"),
-    (re.compile(r"exited with code [1-9]"), "exit_code"),
-    # General errors
-    (re.compile(r"^ERROR:", re.IGNORECASE), "error"),
-    (re.compile(r"^FATAL:", re.IGNORECASE), "fatal"),
-    (re.compile(r"^\s*error\["), "compiler_error"),
-    # Test failures
-    (re.compile(r"\bFAILED\b"), "test_fail"),
-    (re.compile(r"^FAIL:"), "test_fail"),
-    (re.compile(r"AssertionError"), "assertion"),
-    (re.compile(r"AssertionError"), "assertion"),  # common typo in logs
-    (re.compile(r"AssertError"), "assertion"),
-    (re.compile(r"error TS\d+"), "typescript_error"),
-    (re.compile(r"FAILURES"), "test_fail_header"),
-    # Build failures
-    (re.compile(r"Build FAILED", re.IGNORECASE), "build_fail"),
-    (re.compile(r"COMPILATION ERROR", re.IGNORECASE), "build_fail"),
-    (re.compile(r"error\[E\d+\]"), "rust_error"),
-    # Timeouts
-    (re.compile(r"Cancelling", re.IGNORECASE), "cancel"),
-    (re.compile(r"Timed out", re.IGNORECASE), "timeout"),
-    (re.compile(r"exceeded the maximum"), "timeout"),
-    # GitHub Actions error/warning annotations
-    (re.compile(r"^##\[error\]"), "gha_error"),
-    (re.compile(r"^##\[warning\]"), "gha_warning"),
-]
-
 _ps = PatternSet.load("cicd")
-NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
-SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/cicd.json")
 
-_ERROR_CONTEXT = _ps.error_context if _ps else 3
-_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
-_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
 
 
 def classify_line(line: str) -> str:

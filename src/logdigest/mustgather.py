@@ -15,111 +15,29 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
-    BlockConfig,
     PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
-    collapse_blocks,
     find_large_blobs,
     predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-_FALLBACK_NOISE = [
-    # Health checks
-    (re.compile(r'"GET /health[yz]'), "healthz"),
-    (re.compile(r'"GET /readyz'), "readyz"),
-    (re.compile(r'"GET /livez'), "livez"),
-    (re.compile(r"health check (passed|ok|200)", re.IGNORECASE), "healthcheck"),
-    # Leader election
-    (re.compile(r"successfully (acquired|renewed) lease"), "leader_election"),
-    (re.compile(r"lock is held by .+ and has not yet expired"), "leader_election"),
-    # Informer / reflector
-    (re.compile(r"caches populated"), "informer"),
-    (re.compile(r"(Starting|Stopping) shared informer"), "informer"),
-    (re.compile(r"Listing and watching"), "informer"),
-    (re.compile(r"Watch close"), "informer"),
-    (re.compile(r"watch chan closed"), "informer"),
-    # Client-go throttling
-    (re.compile(r"Throttling request"), "throttle"),
-    (re.compile(r"client rate limiter"), "throttle"),
-    # Reconciliation no-ops
-    (re.compile(r"Reconcil(ing|ed).*no changes", re.IGNORECASE), "reconcile_noop"),
-    (re.compile(r"skipping reconcil", re.IGNORECASE), "reconcile_skip"),
-    # YAML metadata noise
-    (re.compile(r"^\s*resourceVersion:"), "yaml_meta"),
-    (re.compile(r"^\s*uid:"), "yaml_meta"),
-    (re.compile(r"^\s*creationTimestamp:"), "yaml_meta"),
-    (re.compile(r"^\s*selfLink:"), "yaml_meta"),
-    (re.compile(r"^\s*managedFields:"), "managed_fields"),
-    (re.compile(r"^\s*- manager:"), "managed_fields"),
-    (re.compile(r"^\s*operation:"), "managed_fields"),
-    (re.compile(r"^\s*fieldsType:"), "managed_fields"),
-    (re.compile(r"^\s*fieldsV1:"), "managed_fields"),
-    (re.compile(r'^\s*f:'), "managed_fields"),
-    # Event recorder boilerplate
-    (re.compile(r"Event\(v1\.ObjectReference"), "event_recorder"),
-    # TLS / cert rotation
-    (re.compile(r"certificate signed by unknown authority"), "cert_bootstrap"),
-    (re.compile(r"TLS handshake error"), "tls_noise"),
-    (re.compile(r"serving cert rotation"), "cert_rotation"),
-    # Blank / separator lines
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^-{5,}$"), "separator"),
-    (re.compile(r"^={5,}$"), "separator"),
-    # Operator SDK / controller-runtime
-    (re.compile(r"controller-runtime.*Starting EventSource"), "controller_rt"),
-    (re.compile(r"controller-runtime.*Starting Controller"), "controller_rt"),
-    (re.compile(r"controller-runtime.*Starting workers"), "controller_rt"),
-    # API request logging (non-error)
-    (re.compile(r'"(GET|LIST|WATCH)" .* 200'), "api_200"),
-    # Prometheus metrics scrape
-    (re.compile(r"GET /metrics"), "metrics_scrape"),
-]
-
-_FALLBACK_SIGNAL = [
-    # Errors
-    (re.compile(r"level=error", re.IGNORECASE), "error"),
-    (re.compile(r"level=fatal", re.IGNORECASE), "fatal"),
-    (re.compile(r"\bE\d{4}\b"), "klog_error"),
-    (re.compile(r"^E[0-9]{4} "), "klog_error"),
-    # Panics / crashes
-    (re.compile(r"panic:"), "panic"),
-    (re.compile(r"goroutine \d+ \["), "goroutine"),
-    (re.compile(r"signal SIGSEGV"), "sigsegv"),
-    # OOM
-    (re.compile(r"OOMKilled"), "oom"),
-    (re.compile(r"Out of memory", re.IGNORECASE), "oom"),
-    (re.compile(r"memory cgroup out of memory"), "oom"),
-    # Pod failures
-    (re.compile(r"CrashLoopBackOff"), "crashloop"),
-    (re.compile(r"Back-off restarting"), "crashloop"),
-    (re.compile(r"ErrImagePull"), "image_pull"),
-    (re.compile(r"ImagePullBackOff"), "image_pull"),
-    (re.compile(r"Evicted"), "eviction"),
-    # Node conditions
-    (re.compile(r"NotReady"), "node_not_ready"),
-    (re.compile(r"node condition.*pressure", re.IGNORECASE), "node_pressure"),
-    # Operator degraded
-    (re.compile(r"Degraded.*True", re.IGNORECASE), "degraded"),
-    (re.compile(r"Available.*False", re.IGNORECASE), "unavailable"),
-    # API errors
-    (re.compile(r'"(GET|LIST|WATCH|PUT|POST|DELETE)" .* (4\d\d|5\d\d)'), "api_error"),
-    # Warning events
-    (re.compile(r"type.*Warning", re.IGNORECASE), "warning_event"),
-]
-
 _ps = PatternSet.load("mustgather")
-NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
-SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/mustgather.json")
 
-_ERROR_CONTEXT = _ps.error_context if _ps else 3
-_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
-_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
-_BLOCK_DETECTORS = _ps.block_detectors if _ps else []
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+K8S_BLOB_MARKERS = _ps.blob_markers
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
+_BLOCK_DETECTORS = _ps.block_detectors
 
 
 def classify_line(line: str) -> str:
@@ -186,18 +104,6 @@ def find_managed_fields_blocks(lines: list[str]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Level 3: Large embedded data detection
 # ---------------------------------------------------------------------------
-
-_FALLBACK_BLOB_MARKERS = [
-    "'metadata':",
-    '"metadata":',
-    "'spec':",
-    '"spec":',
-    "fieldsV1",
-    "managedFields",
-]
-
-K8S_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
-
 
 def find_k8s_blobs(lines: list[str], min_chars: int = 500) -> list[dict]:
     """Find lines containing large K8s API response data."""
@@ -330,32 +236,38 @@ def predigest_file_streaming(filepath: Path) -> str:
     return "\n".join(output)
 
 
-def predigest_bundle(bundle_dir: Path) -> dict[str, str]:
+def predigest_bundle(bundle_dir: Path) -> dict:
     """Pre-digest an extracted must-gather bundle directory.
 
-    Walks the directory, applies per-file pre-digestion to text files,
-    and returns a dict of {relative_path: compressed_text}.
-
+    Walks the directory, applies per-file pre-digestion to text files.
     Uses streaming for files >50MB to avoid OOM on large pod logs.
+
+    Returns:
+        Dict with "files" (relative_path → compressed_text) and
+        "skipped" (list of {"file": path, "reason": str} for files
+        that could not be processed).
     """
-    results = {}
+    files = {}
+    skipped = []
     for filepath in sorted(bundle_dir.rglob("*")):
         if not filepath.is_file():
             continue
         if filepath.suffix in (".gz", ".tar", ".zip", ".png", ".jpg", ".bin"):
             continue
+        rel = str(filepath.relative_to(bundle_dir))
         try:
             size = filepath.stat().st_size
             if size == 0:
                 continue
             result = predigest_file(filepath)
             if result.strip():
-                rel = str(filepath.relative_to(bundle_dir))
-                results[rel] = result
-        except (OSError, UnicodeDecodeError):
-            continue
+                files[rel] = result
+        except OSError as e:
+            skipped.append({"file": rel, "reason": str(e)})
+        except UnicodeDecodeError as e:
+            skipped.append({"file": rel, "reason": f"encoding: {e.encoding}"})
 
-    return results
+    return {"files": files, "skipped": skipped}
 
 
 def analyze_log(filepath: Path) -> dict:

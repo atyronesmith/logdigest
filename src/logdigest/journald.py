@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
-    BlockConfig,
     PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
@@ -23,103 +22,20 @@ from logdigest.domain_base import (
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-_FALLBACK_NOISE = [
-    # Blank / separator
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^-{5,}\s*(Reboot|Boot)?\s*-{0,}$"), "boot_separator"),
-    # Systemd lifecycle (successful)
-    (re.compile(r"Started .+\.$"), "service_started"),
-    (re.compile(r"Stopped .+\.$"), "service_stopped"),
-    (re.compile(r"Starting .+\.\.\.$"), "service_starting"),
-    (re.compile(r"Stopping .+\.\.\.$"), "service_stopping"),
-    (re.compile(r"Reached target .+\.$"), "target_reached"),
-    (re.compile(r"Listening on .+\.$"), "socket_listen"),
-    (re.compile(r"Mounted .+\.$"), "mount"),
-    (re.compile(r"Finished .+\.$"), "service_finished"),
-    # Session management
-    (re.compile(r"pam_unix.*session (opened|closed)"), "pam_session"),
-    (re.compile(r"New session \d+ of user"), "session_new"),
-    (re.compile(r"Removed session \d+"), "session_removed"),
-    (re.compile(r"session-\d+\.scope: Succeeded"), "session_scope"),
-    # DHCP / network
-    (re.compile(r"dhclient.*bound to", re.IGNORECASE), "dhcp"),
-    (re.compile(r"NetworkManager.*DHCP.*renewed", re.IGNORECASE), "dhcp"),
-    (re.compile(r"NetworkManager.*state change.*connected", re.IGNORECASE), "nm_connected"),
-    # Cron
-    (re.compile(r"CROND\[\d+\].*CMD"), "cron"),
-    (re.compile(r"run-parts.*starting"), "cron_parts"),
-    (re.compile(r"run-parts.*finished"), "cron_parts"),
-    (re.compile(r"anacron.*job.*started"), "anacron"),
-    # Audit routine ops
-    (re.compile(r"audit.*type=PROCTITLE"), "audit_proctitle"),
-    (re.compile(r"audit.*type=SYSCALL.*success=yes"), "audit_success"),
-    (re.compile(r"audit.*type=CWD"), "audit_cwd"),
-    (re.compile(r"audit.*type=PATH"), "audit_path"),
-    (re.compile(r"audit.*type=EOE"), "audit_eoe"),
-    # USB device events
-    (re.compile(r"usb.*new (full|high|low|super) speed"), "usb_device"),
-    (re.compile(r"usb.*USB disconnect"), "usb_disconnect"),
-    # Kernel informational
-    (re.compile(r"kernel:.*registered new interface driver"), "kernel_driver"),
-    (re.compile(r"kernel:.*loaded module"), "kernel_module"),
-    (re.compile(r"kernel:.*\blink (up|down)\b.*\bspeed\b"), "kernel_link"),
-    (re.compile(r"kernel:.*audit:.*initialized"), "kernel_audit_init"),
-    # Logrotate
-    (re.compile(r"logrotate.*rotating"), "logrotate"),
-    # Polkit
-    (re.compile(r"polkitd.*Registered"), "polkit"),
-    (re.compile(r"polkitd.*Unregistered"), "polkit"),
-    # Timestamp-only lines (some journal formats)
-    (re.compile(r"^-- .+ --$"), "journal_marker"),
-]
-
-_FALLBACK_SIGNAL = [
-    # OOM killer
-    (re.compile(r"Out of memory", re.IGNORECASE), "oom"),
-    (re.compile(r"oom-killer"), "oom"),
-    (re.compile(r"Kill process \d+"), "oom_kill"),
-    (re.compile(r"Killed process \d+"), "oom_kill"),
-    (re.compile(r"invoked oom-killer"), "oom"),
-    # Segfaults
-    (re.compile(r"segfault at"), "segfault"),
-    (re.compile(r"general protection fault"), "gpf"),
-    (re.compile(r"trap invalid opcode"), "invalid_opcode"),
-    # Service failures
-    (re.compile(r"Failed to start .+\.$"), "service_failed"),
-    (re.compile(r"\.service: Failed"), "service_failed"),
-    (re.compile(r"\.service: Main process exited, code=exited, status=[1-9]"), "service_exit_fail"),
-    (re.compile(r"\.service: Control process exited, code=exited, status=[1-9]"), "service_exit_fail"),
-    (re.compile(r"entered failed state"), "service_failed"),
-    # Disk errors
-    (re.compile(r"I/O error"), "io_error"),
-    (re.compile(r"ext[234].*error"), "fs_error"),
-    (re.compile(r"XFS.*error"), "fs_error"),
-    (re.compile(r"Buffer I/O error"), "io_error"),
-    (re.compile(r"SCSI error"), "scsi_error"),
-    # Kernel panics
-    (re.compile(r"Kernel panic"), "kernel_panic"),
-    (re.compile(r"BUG:"), "kernel_bug"),
-    (re.compile(r"WARNING:.*at "), "kernel_warning"),
-    (re.compile(r"Call Trace:"), "call_trace"),
-    # SELinux
-    (re.compile(r"avc:\s+denied"), "selinux_denied"),
-    (re.compile(r"SELinux.*denied"), "selinux_denied"),
-    # Coredumps
-    (re.compile(r"Process \d+ .+ dumped core"), "coredump"),
-    (re.compile(r"systemd-coredump.*dumped"), "coredump"),
-]
-
 _ps = PatternSet.load("journald")
-NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
-SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/journald.json")
 
-_ERROR_CONTEXT = _ps.error_context if _ps else 5
-_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
-_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
-_BLOCK_DETECTORS = _ps.block_detectors if _ps else []
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
+_BLOCK_DETECTORS = _ps.block_detectors
 
 
 def classify_line(line: str) -> str:

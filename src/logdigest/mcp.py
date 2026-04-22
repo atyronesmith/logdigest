@@ -32,21 +32,11 @@ mcp = FastMCP(
     ),
 )
 
-# Domain detection keywords — loaded from JSON config, with hardcoded fallback
-_FALLBACK_SIGNATURES = {
-    "ansible": ["PLAY [", "TASK [", "ok: [", "fatal: [", "PLAY RECAP"],
-    "cicd": ["##[group]", "##[debug]", "[Pipeline]", "Using Docker executor",
-             "Collecting ", "Successfully installed", "npm warn"],
-    "journald": ["systemd[", "kernel:", "audit[", "pam_unix", "CROND["],
-    "mustgather": ["healthz", "readyz", "livez", "leader election",
-                   "renewed lease", "CrashLoopBackOff", "informer"],
-}
-
-_DOMAIN_SIGNATURES = []
-for _domain in ["ansible", "cicd", "journald", "mustgather"]:
-    _dps = PatternSet.load(_domain)
-    _kw = _dps.domain_keywords if _dps else _FALLBACK_SIGNATURES[_domain]
-    _DOMAIN_SIGNATURES.append((_domain, _kw))
+# Domain detection keywords — loaded from JSON config
+_DOMAIN_SIGNATURES = [
+    (_domain, PatternSet.load(_domain).domain_keywords)
+    for _domain in ["ansible", "cicd", "journald", "mustgather"]
+]
 
 _DIGESTERS = {
     "ansible": ansible_predigest,

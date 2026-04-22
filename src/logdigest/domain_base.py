@@ -72,6 +72,7 @@ class PatternSet:
     """Load and cache pattern sets from JSON files."""
 
     _cache: dict[tuple[str, str | None], PatternSet | None] = {}
+    _schema: dict | None = None
 
     def __init__(
         self,
@@ -192,23 +193,21 @@ class PatternSet:
 
     @classmethod
     def _find_latest(cls, domain: str, patterns_pkg) -> str | None:
-        """Find the most recently generated pattern file for a domain."""
-        best_file = None
-        best_ts = ""
+        """Find the most recently versioned pattern file for a domain.
+
+        Version strings in filenames (domain@VERSION.json) are sorted
+        lexicographically. This avoids reading every file's contents.
+        """
+        prefix = f"{domain}@"
+        candidates = []
         for item in patterns_pkg.iterdir():
             name = item.name if hasattr(item, "name") else str(item)
-            if not name.startswith(f"{domain}@") or not name.endswith(".json"):
-                continue
-            try:
-                raw = item.read_text(encoding="utf-8")
-                data = json.loads(raw)
-                ts = data.get("generated", "")
-                if ts > best_ts:
-                    best_ts = ts
-                    best_file = name
-            except (json.JSONDecodeError, OSError):
-                continue
-        return best_file
+            if name.startswith(prefix) and name.endswith(".json"):
+                candidates.append(name)
+        if not candidates:
+            return None
+        candidates.sort()
+        return candidates[-1]
 
     @classmethod
     def _validate_schema(cls, data: dict) -> None:
@@ -223,12 +222,13 @@ class PatternSet:
             )
             return
 
-        schema_pkg = importlib.resources.files("logdigest.schemas")
-        schema_raw = schema_pkg.joinpath("pattern_set.schema.json").read_text(
-            encoding="utf-8"
-        )
-        schema = json.loads(schema_raw)
-        jsonschema.validate(data, schema)
+        if cls._schema is None:
+            schema_pkg = importlib.resources.files("logdigest.schemas")
+            schema_raw = schema_pkg.joinpath("pattern_set.schema.json").read_text(
+                encoding="utf-8"
+            )
+            cls._schema = json.loads(schema_raw)
+        jsonschema.validate(data, cls._schema)
 
     @classmethod
     def _compile_patterns(cls, pattern_defs: list[dict]) -> PatternList:
@@ -248,8 +248,9 @@ class PatternSet:
 
     @classmethod
     def clear_cache(cls) -> None:
-        """Clear the pattern set cache (useful for testing)."""
+        """Clear the pattern set and schema caches (useful for testing)."""
         cls._cache.clear()
+        cls._schema = None
 
 
 def classify_line(

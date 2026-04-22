@@ -143,52 +143,34 @@ class TestSchemaValidation:
                 pass
 
 
-# ── Pattern count parity ──────────────────────────────────────────────
+# ── Pattern count sanity ─────────────────────────────────────────────
 
 
 class TestPatternCounts:
-    """Verify JSON files have the same pattern counts as Python source."""
+    """Verify JSON files loaded successfully with expected pattern counts."""
 
-    def test_ansible_counts(self):
-        from logdigest.ansible import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("ansible")
-        assert len(ps.noise_patterns) == len(NOISE_PATTERNS)
-        assert len(ps.signal_patterns) == len(SIGNAL_PATTERNS)
-
-    def test_mustgather_counts(self):
-        from logdigest.mustgather import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("mustgather")
-        assert len(ps.noise_patterns) == len(NOISE_PATTERNS)
-        assert len(ps.signal_patterns) == len(SIGNAL_PATTERNS)
-
-    def test_cicd_counts(self):
-        from logdigest.cicd import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("cicd")
-        assert len(ps.noise_patterns) == len(NOISE_PATTERNS)
-        assert len(ps.signal_patterns) == len(SIGNAL_PATTERNS)
-
-    def test_journald_counts(self):
-        from logdigest.journald import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("journald")
-        assert len(ps.noise_patterns) == len(NOISE_PATTERNS)
-        assert len(ps.signal_patterns) == len(SIGNAL_PATTERNS)
+    @pytest.mark.parametrize("domain,min_noise,min_signal", [
+        ("ansible", 30, 8),
+        ("mustgather", 35, 18),
+        ("cicd", 60, 18),
+        ("journald", 34, 24),
+    ])
+    def test_minimum_patterns(self, domain, min_noise, min_signal):
+        ps = PatternSet.load(domain)
+        assert len(ps.noise_patterns) >= min_noise
+        assert len(ps.signal_patterns) >= min_signal
 
 
-# ── Behavioral equivalence ────────────────────────────────────────────
+# ── Classification regression ────────────────────────────────────────
 
 
-class TestBehavioralEquivalence:
-    """Classify the same lines with JSON-loaded vs Python patterns.
+class TestClassificationRegression:
+    """Verify JSON-loaded patterns classify known lines correctly.
 
-    This is the critical regression test — catches regex flag loss,
-    escaping errors, or ordering differences.
+    Catches regex escaping errors, flag loss, or ordering regressions.
     """
 
-    ANSIBLE_LINES = [
+    @pytest.mark.parametrize("line,expected", [
         ("ok: [host1]", "noise:ok"),
         ("skipping: [host2]", "noise:skipping"),
         ("fatal: [host3]", "signal:fatal"),
@@ -197,9 +179,12 @@ class TestBehavioralEquivalence:
         ("some random output", "unknown"),
         ("[DEPRECATION WARNING]", "noise:deprecation"),
         ("PLAY RECAP", "signal:play_recap"),
-    ]
+    ])
+    def test_ansible(self, line, expected):
+        from logdigest.ansible import classify_line as cls
+        assert cls(line) == expected
 
-    MUSTGATHER_LINES = [
+    @pytest.mark.parametrize("line,expected", [
         ('"GET /healthz" 200', "noise:healthz"),
         ("successfully acquired lease", "noise:leader_election"),
         ("caches populated", "noise:informer"),
@@ -209,61 +194,34 @@ class TestBehavioralEquivalence:
         ("Out of memory killed", "signal:oom"),
         ("out of MEMORY", "signal:oom"),
         ("some normal log line", "unknown"),
-    ]
+    ])
+    def test_mustgather(self, line, expected):
+        from logdigest.mustgather import classify_line as cls
+        assert cls(line) == expected
 
-    CICD_LINES = [
+    @pytest.mark.parametrize("line,expected", [
         ("##[debug] some debug", "noise:gha_debug"),
         ("  Collecting requests", "noise:pip_install"),
         ("added 42 packages", "noise:npm_install"),
         ("Process completed with exit code 1", "signal:exit_code"),
         ("FAILED", "signal:test_fail"),
         ("normal build output", "unknown"),
-    ]
+    ])
+    def test_cicd(self, line, expected):
+        from logdigest.cicd import classify_line as cls
+        assert cls(line) == expected
 
-    JOURNALD_LINES = [
+    @pytest.mark.parametrize("line,expected", [
         ("Started some service.", "noise:service_started"),
         ("pam_unix session opened", "noise:pam_session"),
         ("Out of memory: Kill process", "signal:oom"),
         ("segfault at 0x0", "signal:segfault"),
         ("Kernel panic - not syncing", "signal:kernel_panic"),
         ("some normal syslog message", "unknown"),
-    ]
-
-    @pytest.mark.parametrize("line,expected", ANSIBLE_LINES)
-    def test_ansible_equivalence(self, line, expected):
-        from logdigest.ansible import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("ansible")
-        python_result = classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
-        json_result = classify_line(line, ps.noise_patterns, ps.signal_patterns)
-        assert python_result == json_result == expected
-
-    @pytest.mark.parametrize("line,expected", MUSTGATHER_LINES)
-    def test_mustgather_equivalence(self, line, expected):
-        from logdigest.mustgather import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("mustgather")
-        python_result = classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
-        json_result = classify_line(line, ps.noise_patterns, ps.signal_patterns)
-        assert python_result == json_result == expected
-
-    @pytest.mark.parametrize("line,expected", CICD_LINES)
-    def test_cicd_equivalence(self, line, expected):
-        from logdigest.cicd import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("cicd")
-        python_result = classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
-        json_result = classify_line(line, ps.noise_patterns, ps.signal_patterns)
-        assert python_result == json_result == expected
-
-    @pytest.mark.parametrize("line,expected", JOURNALD_LINES)
-    def test_journald_equivalence(self, line, expected):
-        from logdigest.journald import NOISE_PATTERNS, SIGNAL_PATTERNS
-
-        ps = PatternSet.load("journald")
-        python_result = classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
-        json_result = classify_line(line, ps.noise_patterns, ps.signal_patterns)
-        assert python_result == json_result == expected
+    ])
+    def test_journald(self, line, expected):
+        from logdigest.journald import classify_line as cls
+        assert cls(line) == expected
 
 
 # ── Phase 2: Config loading ───────────────────────────────────────────

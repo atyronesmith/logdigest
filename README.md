@@ -41,7 +41,9 @@ compressed = predigest(ansible_log_text)
 
 from logdigest.mustgather import predigest, predigest_bundle
 compressed = predigest(pod_log_text)
-bundle = predigest_bundle(Path("must-gather-dir/"))  # walks entire bundle
+result = predigest_bundle(Path("must-gather-dir/"))  # walks entire bundle
+bundle = result["files"]        # {relative_path: compressed_text}
+skipped = result["skipped"]     # [{file, reason}] for unreadable files
 
 from logdigest.cicd import predigest, detect_ci_system
 compressed = predigest(github_actions_log)  # auto-detects CI system
