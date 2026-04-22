@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import re
+
 from logdigest.discover.classifier import (
+    CandidatePattern,
     _has_error_token,
     classify_template,
     generate_label,
+    resolve_conflicts,
 )
 from logdigest.discover.mining import TemplateCluster
 
@@ -113,3 +117,81 @@ class TestGenerateLabel:
     def test_wildcard_only_template(self):
         label = generate_label("<*>")
         assert label == "pattern"
+
+
+def _make_candidate(
+    regex: str,
+    classification: str,
+    label: str = "",
+    sample_lines: list[str] | None = None,
+) -> CandidatePattern:
+    return CandidatePattern(
+        regex=regex,
+        label=label or classification,
+        classification=classification,
+        confidence=0.9,
+        corpus_frequency=0.05,
+        template="",
+        cluster_size=50,
+        sample_lines=sample_lines or [],
+    )
+
+
+class TestResolveConflicts:
+    def test_noise_blocked_by_ref_signal(self):
+        candidates = [_make_candidate(r"^ok\:", "noise", sample_lines=["ok: [host1]"])]
+        ref_signal = [(re.compile(r"ok"), "ok_signal")]
+        resolved, conflicts = resolve_conflicts(candidates, [], ref_signal)
+        assert len(resolved) == 0
+        assert len(conflicts) == 1
+        assert conflicts[0]["action"] == "blocked"
+
+    def test_noise_passes_when_no_conflict(self):
+        candidates = [_make_candidate(r"^ok\:", "noise", sample_lines=["ok: [host1]"])]
+        ref_signal = [(re.compile(r"^fatal"), "fatal_signal")]
+        resolved, conflicts = resolve_conflicts(candidates, [], ref_signal)
+        assert len(resolved) == 1
+        assert conflicts == []
+
+    def test_signal_flags_ref_noise_for_promotion(self):
+        candidates = [_make_candidate(r"^error\:", "signal", sample_lines=["error: something broke"])]
+        ref_noise = [(re.compile(r"error"), "error_noise")]
+        resolved, conflicts = resolve_conflicts(candidates, ref_noise, [])
+        assert len(resolved) == 1
+        assert resolved[0].classification == "signal"
+        assert len(conflicts) == 1
+        assert conflicts[0]["action"] == "promote"
+
+    def test_signal_no_conflict_with_ref_noise(self):
+        candidates = [_make_candidate(r"^panic\:", "signal", sample_lines=["panic: runtime error"])]
+        ref_noise = [(re.compile(r"^ok"), "ok_noise")]
+        resolved, conflicts = resolve_conflicts(candidates, ref_noise, [])
+        assert len(resolved) == 1
+        assert conflicts == []
+
+    def test_mixed_candidates(self):
+        candidates = [
+            _make_candidate(r"^ok\:", "noise", "ok_line", sample_lines=["ok: [host1]"]),
+            _make_candidate(r"^fatal\:", "signal", "fatal_line", sample_lines=["fatal: [host2]"]),
+        ]
+        ref_noise = [(re.compile(r"fatal"), "fatal_noise")]
+        ref_signal = [(re.compile(r"ok"), "ok_signal")]
+        resolved, conflicts = resolve_conflicts(candidates, ref_noise, ref_signal)
+        assert len(resolved) == 1
+        assert resolved[0].label == "fatal_line"
+        assert len(conflicts) == 2
+        actions = {c["action"] for c in conflicts}
+        assert actions == {"blocked", "promote"}
+
+    def test_invalid_regex_skipped(self):
+        candidates = [_make_candidate(r"[invalid", "noise", sample_lines=["test"])]
+        resolved, conflicts = resolve_conflicts(candidates, [], [])
+        assert resolved == []
+        assert conflicts == []
+
+    def test_no_samples_passes_through(self):
+        candidates = [_make_candidate(r"^ok\:", "noise", sample_lines=[])]
+        ref_signal = [(re.compile(r"ok"), "ok_signal")]
+        resolved, conflicts = resolve_conflicts(candidates, [], ref_signal)
+        assert len(resolved) == 1
+        assert conflicts == []

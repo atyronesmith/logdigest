@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from logdigest.discover.mining import TemplateCluster
 
@@ -38,6 +38,7 @@ class CandidatePattern:
     corpus_frequency: float
     template: str
     cluster_size: int
+    sample_lines: list[str] = field(default_factory=list)
 
 
 def _has_error_token(template: str) -> bool:
@@ -116,6 +117,7 @@ def classify_template(
         corpus_frequency=round(frequency, 6),
         template=cluster.template,
         cluster_size=cluster.size,
+        sample_lines=list(cluster.sample_lines),
     )
 
 
@@ -126,6 +128,11 @@ def resolve_conflicts(
 ) -> tuple[list[CandidatePattern], list[dict]]:
     """Apply signal-always-wins conflict resolution against reference patterns.
 
+    Two directions:
+    - Candidate noise vs reference signal → candidate blocked
+    - Candidate signal vs reference noise → candidate kept, reference
+      noise flagged for promotion (user should update reference file)
+
     Returns (resolved_candidates, conflicts_list).
     """
     conflicts: list[dict] = []
@@ -133,15 +140,18 @@ def resolve_conflicts(
 
     for candidate in candidates:
         try:
-            compiled = re.compile(candidate.regex)
+            re.compile(candidate.regex)
         except re.error:
             continue
 
+        if not candidate.sample_lines:
+            resolved.append(candidate)
+            continue
+
         if candidate.classification == "noise":
-            # Check if this noise candidate matches any reference signal pattern
             blocked = False
             for sig_pattern, sig_label in reference_signal:
-                for sample in _generate_test_strings(compiled):
+                for sample in candidate.sample_lines:
                     if sig_pattern.search(sample):
                         conflicts.append({
                             "pattern": candidate.regex,
@@ -156,21 +166,22 @@ def resolve_conflicts(
                     break
             if not blocked:
                 resolved.append(candidate)
+
+        elif candidate.classification == "signal":
+            for noise_pattern, noise_label in reference_noise:
+                for sample in candidate.sample_lines:
+                    if noise_pattern.search(sample):
+                        conflicts.append({
+                            "pattern": candidate.regex,
+                            "existing_class": "noise",
+                            "proposed_class": "signal",
+                            "reason": f"reference noise pattern '{noise_label}' should be promoted to signal",
+                            "action": "promote",
+                        })
+                        break
+            resolved.append(candidate)
+
         else:
             resolved.append(candidate)
 
     return resolved, conflicts
-
-
-def _generate_test_strings(pattern: re.Pattern) -> list[str]:
-    """Generate simple test strings from a pattern for conflict checking.
-
-    Uses the pattern string itself (stripping anchors) as a rough test.
-    """
-    raw = pattern.pattern
-    raw = raw.lstrip("^").rstrip("$")
-    # Unescape to get approximate literal
-    unescaped = raw.replace("\\[", "[").replace("\\]", "]")
-    unescaped = unescaped.replace("\\(", "(").replace("\\)", ")")
-    unescaped = unescaped.replace(".*?", "test").replace(".*", "test")
-    return [unescaped]

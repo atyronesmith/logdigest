@@ -111,6 +111,10 @@ Three tools are exposed: `predigest` (clean logs), `detect_domain` (identify log
 
 logdigest pairs naturally with cluster diagnostic MCP servers like [openshift-mcp-server](https://github.com/rh-ecosystem-edge/openshift-mcp-server). The diagnostic server pulls must-gather bundles, pod logs, and cluster events; logdigest pre-digests them before they reach the LLM context window. On real must-gather bundles this cuts diagnostic context by 80-90%, which is the difference between a useful triage response and one that truncates or hallucinates mid-analysis. Today the composition is manual (call `predigest`, then pass the result to the diagnostic tool), but wiring the two MCP servers together in a single `.mcp.json` is the intended workflow — Claude Code sees both tool sets and can chain them in a single conversation.
 
+## Trust Boundaries
+
+Pattern sets (the JSON files in `src/logdigest/patterns/`) contain regexes that run against every line of input. They are supply-chain artifacts — treat them like code. Do not load untrusted or user-supplied pattern JSON into `PatternSet` without review. The built-in patterns are authored and tested within this repo; `logdigest discover` generates candidates that should be reviewed before deployment. Log input itself is untrusted by design and handled safely (regex matching, no eval/exec).
+
 ## Documentation
 
 - [Pre-digestion theory and results](docs/PREDIGESTION.md) — why it works (entropy bounds), validated results (83% token savings)

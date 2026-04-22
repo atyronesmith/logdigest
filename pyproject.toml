@@ -19,7 +19,7 @@ Repository = "https://github.com/atyronesmith/logdigest"
 [project.optional-dependencies]
 rag = ["numpy"]
 benchmarks = ["numpy"]
-dev = ["pytest", "jsonschema"]
+dev = ["pytest", "jsonschema", "ruff"]
 discover = ["drain3>=0.9.11", "click>=8.1"]
 mcp = [
     "fastmcp>=3.2.3",

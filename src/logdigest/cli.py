@@ -32,7 +32,8 @@ def cli():
 @click.option("--depth", default=4, type=int, help="Drain3 tree depth.")
 @click.option("--similarity", default=0.4, type=float, help="Drain3 similarity threshold.")
 @click.option("--split", default=0.2, type=float, help="Held-out validation fraction.")
-def discover(corpus_dir, domain, output, reference, min_frequency, depth, similarity, split):
+@click.option("--min-recall", default=0.5, type=float, help="Min recall ratio for validation (default: 0.5).")
+def discover(corpus_dir, domain, output, reference, min_frequency, depth, similarity, split, min_recall):
     """Discover noise/signal patterns from a corpus of log files."""
     try:
         from logdigest.discover.mining import mine_templates
@@ -124,16 +125,25 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
         ref_data = json.loads(Path(reference).read_text(encoding="utf-8"))
         ref_noise = PatternSet._compile_patterns(ref_data.get("noise_patterns", []))
         ref_signal = PatternSet._compile_patterns(ref_data.get("signal_patterns", []))
-        noise, new_conflicts = resolve_conflicts(noise, ref_noise, ref_signal)
+        resolved, new_conflicts = resolve_conflicts(noise + signal, ref_noise, ref_signal)
+        noise = [c for c in resolved if c.classification == "noise"]
+        signal = [c for c in resolved if c.classification == "signal"]
         conflicts.extend(new_conflicts)
         if new_conflicts:
-            click.echo(f"Conflicts resolved: {len(new_conflicts)} blocked")
+            blocked = sum(1 for c in new_conflicts if c["action"] == "blocked")
+            promoted = sum(1 for c in new_conflicts if c["action"] == "promote")
+            parts = []
+            if blocked:
+                parts.append(f"{blocked} blocked")
+            if promoted:
+                parts.append(f"{promoted} promotions flagged")
+            click.echo(f"Conflicts: {', '.join(parts)}")
 
     # 7. Validate
     if test_lines:
-        noise = validate_patterns(noise + signal, test_lines)
-        signal = [c for c in noise if c.classification == "signal"]
-        noise = [c for c in noise if c.classification == "noise"]
+        validated = validate_patterns(noise + signal, test_lines, min_recall_ratio=min_recall)
+        noise = [c for c in validated if c.classification == "noise"]
+        signal = [c for c in validated if c.classification == "signal"]
         click.echo(f"After validation: {len(noise)} noise, {len(signal)} signal")
 
     # 8. Export
