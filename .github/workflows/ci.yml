@@ -12,8 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -e ".[dev]"
-      - run: ruff check src/ tests/
+      - run: uvx ruff check src/ tests/
 
   test:
     runs-on: ubuntu-latest
@@ -25,13 +24,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv pip install --system -e ".[dev]"
-      - run: python -m pytest -v --ignore=tests/test_mcp.py
+      - run: uv run --extra dev pytest -v --ignore=tests/test_mcp.py
 
   test-mcp:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system -e ".[dev,mcp]"
-      - run: python -m pytest -v tests/test_mcp.py
+      - run: uv run --extra dev --extra mcp pytest -v tests/test_mcp.py
