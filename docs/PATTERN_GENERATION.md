@@ -125,63 +125,31 @@ Domain modules load patterns from JSON at import time, falling back to the curre
 
 The `PatternSet` loader validates every pattern file against a JSON Schema on load, before attempting regex compilation. A malformed file (missing `label`, invalid regex syntax, wrong type for `confidence`) produces a clear validation error at load time, not a `re.error` deep in `classify_line()`.
 
-Schema ships as `logdigest/schemas/pattern_set.schema.json`:
+Schema ships as `src/logdigest/schemas/pattern_set.schema.json` (see that file for the full definition). Key structure:
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "required": ["domain", "generated", "noise_patterns", "signal_patterns"],
   "properties": {
-    "domain": { "type": "string" },
-    "version": { "type": "string" },
-    "generated": { "type": "string", "format": "date-time" },
-    "corpus_size": { "type": "integer", "minimum": 0 },
-    "noise_patterns": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/pattern" }
+    "domain": "string",
+    "generated": "date-time",
+    "noise_patterns": [{ "regex": "string", "label": "string", ... }],
+    "signal_patterns": [{ "regex": "string", "label": "string", ... }],
+    "config": {
+      "error_context": "integer",
+      "max_line_len": "integer",
+      "file_streaming_threshold_mb": "integer",
+      "blob_markers": ["string"],
+      "block_detectors": [{ "name", "regex", "min_count", "summary_template" }],
+      "domain_keywords": ["string"]
     },
-    "signal_patterns": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/pattern" }
-    },
-    "baseline_entropy": {
-      "type": "object",
-      "description": "Logprob baseline histogram for drift detection"
-    },
-    "conflicts": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/conflict" }
-    }
-  },
-  "$defs": {
-    "pattern": {
-      "type": "object",
-      "required": ["regex", "label"],
-      "properties": {
-        "regex": { "type": "string" },
-        "label": { "type": "string", "pattern": "^[a-z_]+$" },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "corpus_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
-        "stale": { "type": "boolean" },
-        "stale_cycles": { "type": "integer", "minimum": 0 }
-      }
-    },
-    "conflict": {
-      "type": "object",
-      "required": ["pattern", "existing_class", "proposed_class", "action"],
-      "properties": {
-        "pattern": { "type": "string" },
-        "existing_class": { "enum": ["noise", "signal"] },
-        "proposed_class": { "enum": ["noise", "signal"] },
-        "reason": { "type": "string" },
-        "action": { "enum": ["blocked", "promoted", "added"] },
-        "requires": { "type": "string" }
-      }
-    }
+    "baseline_entropy": "object",
+    "conflicts": [{ "pattern", "existing_class", "proposed_class", "action" }]
   }
 }
 ```
+
+Labels match `^[a-z][a-z0-9_]*$`. Pattern entries may also include `confidence`, `corpus_frequency`, `stale`, and `stale_cycles` fields for automated pattern generation.
 
 The loader additionally validates that every `regex` field compiles successfully via `re.compile()` after schema validation passes. Schema validation uses stdlib `json` for parsing; the `jsonschema` package is an optional dependency (`pip install logdigest[dev]`). If `jsonschema` is not installed, the loader skips schema validation and falls back to regex-compile-time error checking only, with a warning.
 
