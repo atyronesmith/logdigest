@@ -1,0 +1,257 @@
+{
+  "domain": "journald",
+  "version": "baseline",
+  "generated": "2026-04-22T02:48:53Z",
+  "noise_patterns": [
+    {
+      "regex": "^\\s*$",
+      "label": "blank"
+    },
+    {
+      "regex": "^-{5,}\\s*(Reboot|Boot)?\\s*-{0,}$",
+      "label": "boot_separator"
+    },
+    {
+      "regex": "Started .+\\.$",
+      "label": "service_started"
+    },
+    {
+      "regex": "Stopped .+\\.$",
+      "label": "service_stopped"
+    },
+    {
+      "regex": "Starting .+\\.\\.\\.$",
+      "label": "service_starting"
+    },
+    {
+      "regex": "Stopping .+\\.\\.\\.$",
+      "label": "service_stopping"
+    },
+    {
+      "regex": "Reached target .+\\.$",
+      "label": "target_reached"
+    },
+    {
+      "regex": "Listening on .+\\.$",
+      "label": "socket_listen"
+    },
+    {
+      "regex": "Mounted .+\\.$",
+      "label": "mount"
+    },
+    {
+      "regex": "Finished .+\\.$",
+      "label": "service_finished"
+    },
+    {
+      "regex": "pam_unix.*session (opened|closed)",
+      "label": "pam_session"
+    },
+    {
+      "regex": "New session \\d+ of user",
+      "label": "session_new"
+    },
+    {
+      "regex": "Removed session \\d+",
+      "label": "session_removed"
+    },
+    {
+      "regex": "session-\\d+\\.scope: Succeeded",
+      "label": "session_scope"
+    },
+    {
+      "regex": "(?i)dhclient.*bound to",
+      "label": "dhcp"
+    },
+    {
+      "regex": "(?i)NetworkManager.*DHCP.*renewed",
+      "label": "dhcp"
+    },
+    {
+      "regex": "(?i)NetworkManager.*state change.*connected",
+      "label": "nm_connected"
+    },
+    {
+      "regex": "CROND\\[\\d+\\].*CMD",
+      "label": "cron"
+    },
+    {
+      "regex": "run-parts.*starting",
+      "label": "cron_parts"
+    },
+    {
+      "regex": "run-parts.*finished",
+      "label": "cron_parts"
+    },
+    {
+      "regex": "anacron.*job.*started",
+      "label": "anacron"
+    },
+    {
+      "regex": "audit.*type=PROCTITLE",
+      "label": "audit_proctitle"
+    },
+    {
+      "regex": "audit.*type=SYSCALL.*success=yes",
+      "label": "audit_success"
+    },
+    {
+      "regex": "audit.*type=CWD",
+      "label": "audit_cwd"
+    },
+    {
+      "regex": "audit.*type=PATH",
+      "label": "audit_path"
+    },
+    {
+      "regex": "audit.*type=EOE",
+      "label": "audit_eoe"
+    },
+    {
+      "regex": "usb.*new (full|high|low|super) speed",
+      "label": "usb_device"
+    },
+    {
+      "regex": "usb.*USB disconnect",
+      "label": "usb_disconnect"
+    },
+    {
+      "regex": "kernel:.*registered new interface driver",
+      "label": "kernel_driver"
+    },
+    {
+      "regex": "kernel:.*loaded module",
+      "label": "kernel_module"
+    },
+    {
+      "regex": "kernel:.*\\blink (up|down)\\b.*\\bspeed\\b",
+      "label": "kernel_link"
+    },
+    {
+      "regex": "kernel:.*audit:.*initialized",
+      "label": "kernel_audit_init"
+    },
+    {
+      "regex": "logrotate.*rotating",
+      "label": "logrotate"
+    },
+    {
+      "regex": "polkitd.*Registered",
+      "label": "polkit"
+    },
+    {
+      "regex": "polkitd.*Unregistered",
+      "label": "polkit"
+    },
+    {
+      "regex": "^-- .+ --$",
+      "label": "journal_marker"
+    }
+  ],
+  "signal_patterns": [
+    {
+      "regex": "(?i)Out of memory",
+      "label": "oom"
+    },
+    {
+      "regex": "oom-killer",
+      "label": "oom"
+    },
+    {
+      "regex": "Kill process \\d+",
+      "label": "oom_kill"
+    },
+    {
+      "regex": "Killed process \\d+",
+      "label": "oom_kill"
+    },
+    {
+      "regex": "invoked oom-killer",
+      "label": "oom"
+    },
+    {
+      "regex": "segfault at",
+      "label": "segfault"
+    },
+    {
+      "regex": "general protection fault",
+      "label": "gpf"
+    },
+    {
+      "regex": "trap invalid opcode",
+      "label": "invalid_opcode"
+    },
+    {
+      "regex": "Failed to start .+\\.$",
+      "label": "service_failed"
+    },
+    {
+      "regex": "\\.service: Failed",
+      "label": "service_failed"
+    },
+    {
+      "regex": "\\.service: Main process exited, code=exited, status=[1-9]",
+      "label": "service_exit_fail"
+    },
+    {
+      "regex": "\\.service: Control process exited, code=exited, status=[1-9]",
+      "label": "service_exit_fail"
+    },
+    {
+      "regex": "entered failed state",
+      "label": "service_failed"
+    },
+    {
+      "regex": "I/O error",
+      "label": "io_error"
+    },
+    {
+      "regex": "ext[234].*error",
+      "label": "fs_error"
+    },
+    {
+      "regex": "XFS.*error",
+      "label": "fs_error"
+    },
+    {
+      "regex": "Buffer I/O error",
+      "label": "io_error"
+    },
+    {
+      "regex": "SCSI error",
+      "label": "scsi_error"
+    },
+    {
+      "regex": "Kernel panic",
+      "label": "kernel_panic"
+    },
+    {
+      "regex": "BUG:",
+      "label": "kernel_bug"
+    },
+    {
+      "regex": "WARNING:.*at ",
+      "label": "kernel_warning"
+    },
+    {
+      "regex": "Call Trace:",
+      "label": "call_trace"
+    },
+    {
+      "regex": "avc:\\s+denied",
+      "label": "selinux_denied"
+    },
+    {
+      "regex": "SELinux.*denied",
+      "label": "selinux_denied"
+    },
+    {
+      "regex": "Process \\d+ .+ dumped core",
+      "label": "coredump"
+    },
+    {
+      "regex": "systemd-coredump.*dumped",
+      "label": "coredump"
+    }
+  ]
+}

@@ -8,12 +8,156 @@ block/blob detectors.
 
 from __future__ import annotations
 
+import importlib.resources
+import json
 import re
+import warnings
 from collections import Counter
 from pathlib import Path
 
 # Type alias for pattern lists used across all domain modules
 PatternList = list[tuple[re.Pattern, str]]
+
+
+class PatternSet:
+    """Load and cache pattern sets from JSON files."""
+
+    _cache: dict[tuple[str, str | None], PatternSet | None] = {}
+
+    def __init__(
+        self,
+        domain: str,
+        noise_patterns: PatternList,
+        signal_patterns: PatternList,
+        metadata: dict | None = None,
+    ):
+        self.domain = domain
+        self.noise_patterns = noise_patterns
+        self.signal_patterns = signal_patterns
+        self.metadata = metadata or {}
+
+    @classmethod
+    def load(cls, domain: str, version: str | None = None) -> PatternSet | None:
+        """Load patterns for a domain from JSON.
+
+        Args:
+            domain: Domain name (e.g., "ansible", "mustgather").
+            version: None for baseline, "latest" for most recent
+                generated file, or explicit version string.
+
+        Returns:
+            PatternSet if found, None if file not found.
+
+        Raises:
+            FileNotFoundError: If an explicit version is requested
+                but the file does not exist.
+            ValueError: If the JSON is malformed or contains
+                invalid regex patterns.
+        """
+        cache_key = (domain, version)
+        if cache_key in cls._cache:
+            return cls._cache[cache_key]
+
+        result = cls._load_uncached(domain, version)
+        cls._cache[cache_key] = result
+        return result
+
+    @classmethod
+    def _load_uncached(cls, domain: str, version: str | None) -> PatternSet | None:
+        patterns_pkg = importlib.resources.files("logdigest.patterns")
+
+        if version is None:
+            filename = f"{domain}.json"
+        elif version == "latest":
+            filename = cls._find_latest(domain, patterns_pkg)
+            if filename is None:
+                filename = f"{domain}.json"
+        else:
+            filename = f"{domain}@{version}.json"
+
+        resource = patterns_pkg.joinpath(filename)
+        try:
+            raw = resource.read_text(encoding="utf-8")
+        except (FileNotFoundError, TypeError):
+            if version is not None and version != "latest":
+                raise FileNotFoundError(
+                    f"Pattern file not found: {filename}"
+                )
+            return None
+
+        data = json.loads(raw)
+        cls._validate_schema(data)
+
+        noise = cls._compile_patterns(data.get("noise_patterns", []))
+        signal = cls._compile_patterns(data.get("signal_patterns", []))
+
+        metadata = {
+            k: v for k, v in data.items()
+            if k not in ("noise_patterns", "signal_patterns")
+        }
+
+        return cls(domain, noise, signal, metadata)
+
+    @classmethod
+    def _find_latest(cls, domain: str, patterns_pkg) -> str | None:
+        """Find the most recently generated pattern file for a domain."""
+        best_file = None
+        best_ts = ""
+        for item in patterns_pkg.iterdir():
+            name = item.name if hasattr(item, "name") else str(item)
+            if not name.startswith(f"{domain}@") or not name.endswith(".json"):
+                continue
+            try:
+                raw = item.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                ts = data.get("generated", "")
+                if ts > best_ts:
+                    best_ts = ts
+                    best_file = name
+            except (json.JSONDecodeError, OSError):
+                continue
+        return best_file
+
+    @classmethod
+    def _validate_schema(cls, data: dict) -> None:
+        """Validate against JSON Schema if jsonschema is available."""
+        try:
+            import jsonschema
+        except ImportError:
+            warnings.warn(
+                "jsonschema not installed; skipping pattern file schema "
+                "validation. Install with: pip install logdigest[dev]",
+                stacklevel=3,
+            )
+            return
+
+        schema_pkg = importlib.resources.files("logdigest.schemas")
+        schema_raw = schema_pkg.joinpath("pattern_set.schema.json").read_text(
+            encoding="utf-8"
+        )
+        schema = json.loads(schema_raw)
+        jsonschema.validate(data, schema)
+
+    @classmethod
+    def _compile_patterns(cls, pattern_defs: list[dict]) -> PatternList:
+        """Compile regex strings from JSON into PatternList."""
+        result: PatternList = []
+        for entry in pattern_defs:
+            regex_str = entry["regex"]
+            label = entry["label"]
+            try:
+                compiled = re.compile(regex_str)
+            except re.error as e:
+                raise ValueError(
+                    f"Invalid regex in pattern '{label}': {regex_str!r} — {e}"
+                ) from e
+            result.append((compiled, label))
+        return result
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear the pattern set cache (useful for testing)."""
+        cls._cache.clear()
 
 
 def classify_line(

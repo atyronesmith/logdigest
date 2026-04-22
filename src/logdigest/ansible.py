@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
@@ -24,7 +25,7 @@ from logdigest.domain_base import (
 # Level 1: Line-level classification
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
+_FALLBACK_NOISE = [
     (re.compile(r"^ok: \["), "ok"),
     (re.compile(r"^skipping: \["), "skipping"),
     (re.compile(r"^changed: \["), "changed"),
@@ -59,7 +60,7 @@ NOISE_PATTERNS = [
     (re.compile(r'^"msg": "Starting CSV: "'), "json_frag"),
 ]
 
-SIGNAL_PATTERNS = [
+_FALLBACK_SIGNAL = [
     (re.compile(r"^fatal: \["), "fatal"),
     (re.compile(r"^FAILED!"), "failed"),
     (re.compile(r"^ERROR"), "error"),
@@ -70,6 +71,10 @@ SIGNAL_PATTERNS = [
     (re.compile(r"^    \"stderr\":"), "stderr"),
     (re.compile(r"^    \"rc\":"), "return_code"),
 ]
+
+_ps = PatternSet.load("ansible")
+NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
+SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
 
 def classify_line(line: str) -> str:

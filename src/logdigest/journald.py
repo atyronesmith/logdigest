@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     predigest_stream,
@@ -25,7 +26,7 @@ from logdigest.domain_base import (
 # Level 1: Line-level classification
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
+_FALLBACK_NOISE = [
     # Blank / separator
     (re.compile(r"^\s*$"), "blank"),
     (re.compile(r"^-{5,}\s*(Reboot|Boot)?\s*-{0,}$"), "boot_separator"),
@@ -75,7 +76,7 @@ NOISE_PATTERNS = [
     (re.compile(r"^-- .+ --$"), "journal_marker"),
 ]
 
-SIGNAL_PATTERNS = [
+_FALLBACK_SIGNAL = [
     # OOM killer
     (re.compile(r"Out of memory", re.IGNORECASE), "oom"),
     (re.compile(r"oom-killer"), "oom"),
@@ -110,6 +111,10 @@ SIGNAL_PATTERNS = [
     (re.compile(r"Process \d+ .+ dumped core"), "coredump"),
     (re.compile(r"systemd-coredump.*dumped"), "coredump"),
 ]
+
+_ps = PatternSet.load("journald")
+NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
+SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
 
 def classify_line(line: str) -> str:

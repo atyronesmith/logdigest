@@ -17,6 +17,7 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
@@ -115,14 +116,14 @@ _GITLAB_CI_NOISE = [
     (re.compile(r"^\s*\$ echo"), "gitlab_echo"),
 ]
 
-NOISE_PATTERNS = (
+_FALLBACK_NOISE = (
     _COMMON_NOISE
     + _GITHUB_ACTIONS_NOISE
     + _JENKINS_NOISE
     + _GITLAB_CI_NOISE
 )
 
-SIGNAL_PATTERNS = [
+_FALLBACK_SIGNAL = [
     # Exit codes
     (re.compile(r"Process completed with exit code [1-9]"), "exit_code"),
     (re.compile(r"exit code [1-9]"), "exit_code"),
@@ -151,6 +152,10 @@ SIGNAL_PATTERNS = [
     (re.compile(r"^##\[error\]"), "gha_error"),
     (re.compile(r"^##\[warning\]"), "gha_warning"),
 ]
+
+_ps = PatternSet.load("cicd")
+NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
+SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
 
 def classify_line(line: str) -> str:

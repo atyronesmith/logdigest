@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
@@ -26,7 +27,7 @@ from logdigest.domain_base import (
 # Level 1: Line-level classification
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
+_FALLBACK_NOISE = [
     # Health checks
     (re.compile(r'"GET /health[yz]'), "healthz"),
     (re.compile(r'"GET /readyz'), "readyz"),
@@ -78,7 +79,7 @@ NOISE_PATTERNS = [
     (re.compile(r"GET /metrics"), "metrics_scrape"),
 ]
 
-SIGNAL_PATTERNS = [
+_FALLBACK_SIGNAL = [
     # Errors
     (re.compile(r"level=error", re.IGNORECASE), "error"),
     (re.compile(r"level=fatal", re.IGNORECASE), "fatal"),
@@ -109,6 +110,10 @@ SIGNAL_PATTERNS = [
     # Warning events
     (re.compile(r"type.*Warning", re.IGNORECASE), "warning_event"),
 ]
+
+_ps = PatternSet.load("mustgather")
+NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
+SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
 
 def classify_line(line: str) -> str:

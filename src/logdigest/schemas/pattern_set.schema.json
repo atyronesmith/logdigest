@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["domain", "generated", "noise_patterns", "signal_patterns"],
+  "properties": {
+    "domain": { "type": "string" },
+    "version": { "type": "string" },
+    "generated": { "type": "string", "format": "date-time" },
+    "corpus_size": { "type": "integer", "minimum": 0 },
+    "noise_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "signal_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "baseline_entropy": {
+      "type": "object",
+      "description": "Logprob baseline histogram for drift detection"
+    },
+    "conflicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conflict" }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "required": ["regex", "label"],
+      "properties": {
+        "regex": { "type": "string" },
+        "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "corpus_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stale": { "type": "boolean" },
+        "stale_cycles": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["pattern", "existing_class", "proposed_class", "action"],
+      "properties": {
+        "pattern": { "type": "string" },
+        "existing_class": { "enum": ["noise", "signal"] },
+        "proposed_class": { "enum": ["noise", "signal"] },
+        "reason": { "type": "string" },
+        "action": { "enum": ["blocked", "promoted", "added"] },
+        "requires": { "type": "string" }
+      }
+    }
+  }
+}
