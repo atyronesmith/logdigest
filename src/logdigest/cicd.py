@@ -1,7 +1,7 @@
 """CI/CD log pre-digestion: GitHub Actions, Jenkins, GitLab CI.
 
 Patterns and thresholds are loaded from patterns/cicd.json at
-import time, with hardcoded fallbacks if the JSON is missing.
+import time.
 
 Three levels of compression:
 1. Line-level: classify lines as noise/signal via regex patterns

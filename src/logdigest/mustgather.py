@@ -1,7 +1,7 @@
 """OpenShift must-gather pre-digestion: cluster diagnostic noise removal.
 
 Patterns, block detectors, and thresholds are loaded from
-patterns/mustgather.json at import time, with hardcoded fallbacks.
+patterns/mustgather.json at import time.
 
 Three levels of compression:
 1. Line-level: classify lines as noise/signal via regex patterns

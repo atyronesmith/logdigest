@@ -1,7 +1,7 @@
 """Ansible log pre-digestion: domain-specific noise removal.
 
 Patterns and thresholds are loaded from patterns/ansible.json at
-import time, with hardcoded fallbacks if the JSON is missing.
+import time.
 
 Three levels of compression:
 1. Line-level: classify lines as noise/signal via regex patterns

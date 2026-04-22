@@ -119,7 +119,7 @@ Output is a JSON pattern set, not Python source:
 }
 ```
 
-Domain modules load patterns from JSON at import time, falling back to the current compiled defaults if no pattern file is present.
+Domain modules load patterns from JSON at import time. A missing pattern file raises `RuntimeError`.
 
 ### Schema Validation
 

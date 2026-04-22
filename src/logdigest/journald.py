@@ -1,7 +1,7 @@
 """Systemd journal pre-digestion: journalctl noise removal.
 
 Patterns, block detectors, and thresholds are loaded from
-patterns/journald.json at import time, with hardcoded fallbacks.
+patterns/journald.json at import time.
 
 Three levels of compression:
 1. Line-level: classify lines as noise/signal via regex patterns
