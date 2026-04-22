@@ -20,11 +20,13 @@ Repository = "https://github.com/atyronesmith/denoise"
 rag = ["numpy"]
 benchmarks = ["numpy"]
 dev = ["pytest", "jsonschema"]
+discover = ["drain3>=0.9.11", "click>=8.1"]
 mcp = [
     "fastmcp>=3.2.3",
 ]
 
 [project.scripts]
+logdigest = "logdigest.cli:cli"
 logdigest-mcp = "logdigest.mcp:main"
 
 [tool.hatch.build.targets.wheel]
