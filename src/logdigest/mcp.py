@@ -20,6 +20,7 @@ from logdigest.mustgather import predigest as mustgather_predigest
 from logdigest.cicd import predigest as cicd_predigest, detect_ci_system
 from logdigest.journald import predigest as journald_predigest
 from logdigest.entropy import corpus_entropy, entropy_report
+from logdigest.domain_base import PatternSet
 
 mcp = FastMCP(
     "logdigest",
@@ -31,15 +32,21 @@ mcp = FastMCP(
     ),
 )
 
-# Domain detection keywords (checked in order)
-_DOMAIN_SIGNATURES = [
-    ("ansible", ["PLAY [", "TASK [", "ok: [", "fatal: [", "PLAY RECAP"]),
-    ("cicd", ["##[group]", "##[debug]", "[Pipeline]", "Using Docker executor",
-              "Collecting ", "Successfully installed", "npm warn"]),
-    ("journald", ["systemd[", "kernel:", "audit[", "pam_unix", "CROND["]),
-    ("mustgather", ["healthz", "readyz", "livez", "leader election",
-                    "renewed lease", "CrashLoopBackOff", "informer"]),
-]
+# Domain detection keywords — loaded from JSON config, with hardcoded fallback
+_FALLBACK_SIGNATURES = {
+    "ansible": ["PLAY [", "TASK [", "ok: [", "fatal: [", "PLAY RECAP"],
+    "cicd": ["##[group]", "##[debug]", "[Pipeline]", "Using Docker executor",
+             "Collecting ", "Successfully installed", "npm warn"],
+    "journald": ["systemd[", "kernel:", "audit[", "pam_unix", "CROND["],
+    "mustgather": ["healthz", "readyz", "livez", "leader election",
+                   "renewed lease", "CrashLoopBackOff", "informer"],
+}
+
+_DOMAIN_SIGNATURES = []
+for _domain in ["ansible", "cicd", "journald", "mustgather"]:
+    _dps = PatternSet.load(_domain)
+    _kw = _dps.domain_keywords if _dps else _FALLBACK_SIGNATURES[_domain]
+    _DOMAIN_SIGNATURES.append((_domain, _kw))
 
 _DIGESTERS = {
     "ansible": ansible_predigest,

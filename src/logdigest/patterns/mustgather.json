@@ -237,5 +237,26 @@
       "regex": "(?i)type.*Warning",
       "label": "warning_event"
     }
-  ]
+  ],
+  "config": {
+    "error_context": 3,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "blob_markers": ["'metadata':", "\"metadata\":", "'spec':", "\"spec\":", "fieldsV1", "managedFields"],
+    "block_detectors": [
+      {
+        "name": "health_checks",
+        "regex": "(?i)(health[yz]|readyz|livez)",
+        "min_count": 3,
+        "summary_template": "[HEALTH CHECKS: {count} lines, all OK]"
+      },
+      {
+        "name": "leader_election",
+        "regex": "(renewed|acquired) lease",
+        "min_count": 3,
+        "summary_template": "[LEADER ELECTION: {count} renewals]"
+      }
+    ],
+    "domain_keywords": ["healthz", "readyz", "livez", "leader election", "renewed lease", "CrashLoopBackOff", "informer"]
+  }
 }

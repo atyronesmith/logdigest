@@ -253,5 +253,19 @@
       "regex": "systemd-coredump.*dumped",
       "label": "coredump"
     }
-  ]
+  ],
+  "config": {
+    "error_context": 5,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "block_detectors": [
+      {
+        "name": "audit_bursts",
+        "regex": "audit\\[\\d+\\]:",
+        "min_count": 5,
+        "summary_template": "[AUDIT BLOCK: {count} entries]"
+      }
+    ],
+    "domain_keywords": ["systemd[", "kernel:", "audit[", "pam_unix", "CROND["]
+  }
 }

@@ -22,6 +22,26 @@
     "conflicts": {
       "type": "array",
       "items": { "$ref": "#/$defs/conflict" }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "error_context": { "type": "integer", "minimum": 0 },
+        "max_line_len": { "type": "integer", "minimum": 1 },
+        "file_streaming_threshold_mb": { "type": "integer", "minimum": 1 },
+        "blob_markers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "block_detectors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/block_detector" }
+        },
+        "domain_keywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
     }
   },
   "$defs": {
@@ -47,6 +67,19 @@
         "reason": { "type": "string" },
         "action": { "enum": ["blocked", "promoted", "added"] },
         "requires": { "type": "string" }
+      }
+    },
+    "block_detector": {
+      "type": "object",
+      "required": ["name", "regex", "min_count", "summary_template"],
+      "properties": {
+        "name": { "type": "string" },
+        "regex": { "type": "string" },
+        "min_count": { "type": "integer", "minimum": 1 },
+        "summary_template": {
+          "type": "string",
+          "description": "Template with {count} placeholder"
+        }
       }
     }
   }

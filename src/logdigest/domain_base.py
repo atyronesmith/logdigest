@@ -13,10 +13,59 @@ import json
 import re
 import warnings
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 # Type alias for pattern lists used across all domain modules
 PatternList = list[tuple[re.Pattern, str]]
+
+
+@dataclass
+class BlockConfig:
+    """Configuration for a simple block detector."""
+
+    name: str
+    match_regex: re.Pattern
+    min_count: int
+    summary_template: str
+
+
+def collapse_blocks(lines: list[str], detectors: list[BlockConfig]) -> list[str]:
+    """Collapse consecutive matching lines using block detectors.
+
+    For each detector, consecutive lines matching match_regex are
+    replaced with summary_template.format(count=N) when N >= min_count.
+    """
+    if not detectors:
+        return lines
+
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        matched_detector = None
+        for det in detectors:
+            if det.match_regex.search(lines[i]):
+                matched_detector = det
+                break
+
+        if matched_detector is None:
+            result.append(lines[i])
+            i += 1
+            continue
+
+        run_start = i
+        while i < len(lines) and matched_detector.match_regex.search(lines[i]):
+            i += 1
+        count = i - run_start
+
+        if count >= matched_detector.min_count:
+            result.append(
+                matched_detector.summary_template.format(count=count)
+            )
+        else:
+            result.extend(lines[run_start:i])
+
+    return result
 
 
 class PatternSet:
@@ -30,11 +79,53 @@ class PatternSet:
         noise_patterns: PatternList,
         signal_patterns: PatternList,
         metadata: dict | None = None,
+        config: dict | None = None,
     ):
         self.domain = domain
         self.noise_patterns = noise_patterns
         self.signal_patterns = signal_patterns
         self.metadata = metadata or {}
+        self._config = config or {}
+
+    @property
+    def error_context(self) -> int:
+        return self._config.get("error_context", 3)
+
+    @property
+    def max_line_len(self) -> int:
+        return self._config.get("max_line_len", 500)
+
+    @property
+    def file_streaming_threshold_mb(self) -> int:
+        return self._config.get("file_streaming_threshold_mb", 50)
+
+    @property
+    def blob_markers(self) -> list[str]:
+        return self._config.get("blob_markers", [])
+
+    @property
+    def domain_keywords(self) -> list[str]:
+        return self._config.get("domain_keywords", [])
+
+    @property
+    def block_detectors(self) -> list[BlockConfig]:
+        raw = self._config.get("block_detectors", [])
+        result = []
+        for entry in raw:
+            try:
+                compiled = re.compile(entry["regex"])
+            except re.error as e:
+                raise ValueError(
+                    f"Invalid regex in block detector '{entry['name']}': "
+                    f"{entry['regex']!r} — {e}"
+                ) from e
+            result.append(BlockConfig(
+                name=entry["name"],
+                match_regex=compiled,
+                min_count=entry["min_count"],
+                summary_template=entry["summary_template"],
+            ))
+        return result
 
     @classmethod
     def load(cls, domain: str, version: str | None = None) -> PatternSet | None:
@@ -91,12 +182,13 @@ class PatternSet:
         noise = cls._compile_patterns(data.get("noise_patterns", []))
         signal = cls._compile_patterns(data.get("signal_patterns", []))
 
+        config = data.get("config", {})
         metadata = {
             k: v for k, v in data.items()
-            if k not in ("noise_patterns", "signal_patterns")
+            if k not in ("noise_patterns", "signal_patterns", "config")
         }
 
-        return cls(domain, noise, signal, metadata)
+        return cls(domain, noise, signal, metadata, config)
 
     @classmethod
     def _find_latest(cls, domain: str, patterns_pkg) -> str | None:

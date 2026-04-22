@@ -76,6 +76,10 @@ _ps = PatternSet.load("ansible")
 NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
 SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
+_ERROR_CONTEXT = _ps.error_context if _ps else 5
+_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
+_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
+
 
 def classify_line(line: str) -> str:
     """Classify a single log line as noise, signal, or unknown."""
@@ -172,7 +176,7 @@ def predigest(text: str) -> str:
         stripped = line.strip()
         if (stripped.startswith("fatal:") or stripped.startswith("FAILED!")
                 or stripped.startswith("failed:") or "UNREACHABLE!" in stripped):
-            for j in range(max(0, i - 5), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + 3)):
                 error_lines.add(j)
 
     output = []
@@ -224,9 +228,7 @@ def predigest(text: str) -> str:
             continue
 
         # Level 3: Truncate huge K8s API responses
-        if len(line) > 500 and (
-            "'metadata':" in line or '"metadata":' in line or "fieldsV1" in line
-        ):
+        if len(line) > _MAX_LINE_LEN and any(m in line for m in ANSIBLE_BLOB_MARKERS):
             m = re.search(r"'kind': '(\w+)'", line) or re.search(r'"kind": "(\w+)"', line)
             kind = m.group(1) if m else "resource"
             m = re.search(r"'name': '([\w-]+)'", line) or re.search(r'"name": "([\w-]+)"', line)
@@ -243,13 +245,15 @@ def predigest(text: str) -> str:
     return "\n".join(output)
 
 
-ANSIBLE_BLOB_MARKERS = [
+_FALLBACK_BLOB_MARKERS = [
     "'metadata':",
     '"metadata":',
     "'spec':",
     '"spec":',
     "fieldsV1",
 ]
+
+ANSIBLE_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
 
 
 def _blob_handler(line: str) -> str | None:
@@ -272,7 +276,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -287,8 +291,8 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=5,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
             blob_handler=_blob_handler,
         )
     return "\n".join(output)

@@ -349,5 +349,11 @@
       "regex": "^##\\[warning\\]",
       "label": "gha_warning"
     }
-  ]
+  ],
+  "config": {
+    "error_context": 3,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "domain_keywords": ["##[group]", "##[debug]", "[Pipeline]", "Using Docker executor", "Collecting ", "Successfully installed", "npm warn"]
+  }
 }

@@ -157,6 +157,10 @@ _ps = PatternSet.load("cicd")
 NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
 SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
+_ERROR_CONTEXT = _ps.error_context if _ps else 3
+_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
+_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
+
 
 def classify_line(line: str) -> str:
     """Classify a single log line as noise, signal, or unknown."""
@@ -293,7 +297,7 @@ def predigest(text: str, ci_system: str | None = None) -> str:
     for i, line in enumerate(lines):
         cls = classify_line(line)
         if cls.startswith("signal:"):
-            for j in range(max(0, i - 3), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
@@ -383,7 +387,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -405,8 +409,8 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=3,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
             blob_handler=_blob_handler,
         )
     return "\n".join(output)

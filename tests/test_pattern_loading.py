@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from logdigest.domain_base import PatternSet, classify_line
+from logdigest.domain_base import BlockConfig, PatternSet, classify_line, collapse_blocks
 
 
 @pytest.fixture(autouse=True)
@@ -264,3 +264,173 @@ class TestBehavioralEquivalence:
         python_result = classify_line(line, NOISE_PATTERNS, SIGNAL_PATTERNS)
         json_result = classify_line(line, ps.noise_patterns, ps.signal_patterns)
         assert python_result == json_result == expected
+
+
+# ── Phase 2: Config loading ───────────────────────────────────────────
+
+
+class TestConfigLoading:
+    def test_ansible_config(self):
+        ps = PatternSet.load("ansible")
+        assert ps.error_context == 5
+        assert ps.max_line_len == 500
+        assert ps.file_streaming_threshold_mb == 50
+        assert "'metadata':" in ps.blob_markers
+        assert len(ps.domain_keywords) == 5
+
+    def test_mustgather_config(self):
+        ps = PatternSet.load("mustgather")
+        assert ps.error_context == 3
+        assert ps.max_line_len == 500
+        assert "managedFields" in ps.blob_markers
+        assert len(ps.block_detectors) == 2
+        assert len(ps.domain_keywords) == 7
+
+    def test_cicd_config(self):
+        ps = PatternSet.load("cicd")
+        assert ps.error_context == 3
+        assert len(ps.block_detectors) == 0
+        assert len(ps.domain_keywords) == 7
+
+    def test_journald_config(self):
+        ps = PatternSet.load("journald")
+        assert ps.error_context == 5
+        assert len(ps.block_detectors) == 1
+        assert ps.block_detectors[0].name == "audit_bursts"
+        assert ps.block_detectors[0].min_count == 5
+
+    def test_config_defaults_when_missing(self):
+        ps = PatternSet("test", [], [], config={})
+        assert ps.error_context == 3
+        assert ps.max_line_len == 500
+        assert ps.file_streaming_threshold_mb == 50
+        assert ps.blob_markers == []
+        assert ps.block_detectors == []
+        assert ps.domain_keywords == []
+
+
+# ── Phase 2: collapse_blocks ─────────────────────────────────────────
+
+
+class TestCollapseBlocks:
+    def test_no_detectors_passthrough(self):
+        lines = ["a", "b", "c"]
+        assert collapse_blocks(lines, []) == lines
+
+    def test_collapse_above_threshold(self):
+        det = BlockConfig(
+            name="test",
+            match_regex=re.compile(r"^health"),
+            min_count=3,
+            summary_template="[HEALTH: {count} checks]",
+        )
+        lines = [
+            "health check ok",
+            "health check ok",
+            "health check ok",
+            "health check ok",
+            "error: something bad",
+        ]
+        result = collapse_blocks(lines, [det])
+        assert result == ["[HEALTH: 4 checks]", "error: something bad"]
+
+    def test_below_threshold_passthrough(self):
+        det = BlockConfig(
+            name="test",
+            match_regex=re.compile(r"^health"),
+            min_count=3,
+            summary_template="[HEALTH: {count} checks]",
+        )
+        lines = ["health check ok", "health check ok", "other line"]
+        result = collapse_blocks(lines, [det])
+        assert result == lines
+
+    def test_multiple_detectors(self):
+        health = BlockConfig(
+            name="health",
+            match_regex=re.compile(r"healthz"),
+            min_count=2,
+            summary_template="[HEALTH: {count}]",
+        )
+        audit = BlockConfig(
+            name="audit",
+            match_regex=re.compile(r"audit\["),
+            min_count=2,
+            summary_template="[AUDIT: {count}]",
+        )
+        lines = [
+            "GET /healthz 200",
+            "GET /healthz 200",
+            "GET /healthz 200",
+            "normal line",
+            "audit[123]: op1",
+            "audit[124]: op2",
+        ]
+        result = collapse_blocks(lines, [health, audit])
+        assert result == ["[HEALTH: 3]", "normal line", "[AUDIT: 2]"]
+
+    def test_mustgather_block_detectors_from_json(self):
+        ps = PatternSet.load("mustgather")
+        dets = ps.block_detectors
+        lines = (
+            ['GET /healthz 200 ok'] * 5
+            + ["normal log line"]
+            + ["successfully renewed lease foo/bar"] * 4
+        )
+        result = collapse_blocks(lines, dets)
+        assert result == [
+            "[HEALTH CHECKS: 5 lines, all OK]",
+            "normal log line",
+            "[LEADER ELECTION: 4 renewals]",
+        ]
+
+    def test_journald_block_detectors_from_json(self):
+        ps = PatternSet.load("journald")
+        dets = ps.block_detectors
+        lines = (
+            ["audit[100]: type=SYSCALL"] * 6
+            + ["kernel: something important"]
+        )
+        result = collapse_blocks(lines, dets)
+        assert result == [
+            "[AUDIT BLOCK: 6 entries]",
+            "kernel: something important",
+        ]
+
+
+# ── Phase 2: Config-driven predigest ─────────────────────────────────
+
+
+class TestConfigDrivenPredigest:
+    def test_mustgather_health_collapse(self):
+        from logdigest.mustgather import predigest
+
+        lines = (
+            ['GET /healthz 200 ok'] * 5
+            + ["level=error something bad happened"]
+        )
+        result = predigest("\n".join(lines))
+        assert "[HEALTH CHECKS: 5 lines, all OK]" in result
+        assert "something bad happened" in result
+
+    def test_mustgather_leader_election_collapse(self):
+        from logdigest.mustgather import predigest
+
+        lines = (
+            ["successfully renewed lease foo/bar"] * 4
+            + ["CrashLoopBackOff pod-xyz"]
+        )
+        result = predigest("\n".join(lines))
+        assert "[LEADER ELECTION: 4 renewals]" in result
+        assert "CrashLoopBackOff" in result
+
+    def test_journald_audit_collapse(self):
+        from logdigest.journald import predigest
+
+        lines = (
+            ["audit[100]: type=SYSCALL msg=test"] * 7
+            + ["segfault at 0x42"]
+        )
+        result = predigest("\n".join(lines))
+        assert "[AUDIT BLOCK: 7 entries]" in result
+        assert "segfault" in result

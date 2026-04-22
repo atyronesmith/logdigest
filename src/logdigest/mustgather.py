@@ -16,9 +16,11 @@ import re
 from pathlib import Path
 
 from logdigest.domain_base import (
+    BlockConfig,
     PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
+    collapse_blocks,
     find_large_blobs,
     predigest_stream,
 )
@@ -115,6 +117,11 @@ _ps = PatternSet.load("mustgather")
 NOISE_PATTERNS = _ps.noise_patterns if _ps else _FALLBACK_NOISE
 SIGNAL_PATTERNS = _ps.signal_patterns if _ps else _FALLBACK_SIGNAL
 
+_ERROR_CONTEXT = _ps.error_context if _ps else 3
+_MAX_LINE_LEN = _ps.max_line_len if _ps else 500
+_STREAMING_THRESHOLD = (_ps.file_streaming_threshold_mb if _ps else 50) * 1024 * 1024
+_BLOCK_DETECTORS = _ps.block_detectors if _ps else []
+
 
 def classify_line(line: str) -> str:
     """Classify a single log line as noise, signal, or unknown."""
@@ -181,7 +188,7 @@ def find_managed_fields_blocks(lines: list[str]) -> list[dict]:
 # Level 3: Large embedded data detection
 # ---------------------------------------------------------------------------
 
-K8S_BLOB_MARKERS = [
+_FALLBACK_BLOB_MARKERS = [
     "'metadata':",
     '"metadata":',
     "'spec':",
@@ -189,6 +196,8 @@ K8S_BLOB_MARKERS = [
     "fieldsV1",
     "managedFields",
 ]
+
+K8S_BLOB_MARKERS = _ps.blob_markers if _ps else _FALLBACK_BLOB_MARKERS
 
 
 def find_k8s_blobs(lines: list[str], min_chars: int = 500) -> list[dict]:
@@ -212,7 +221,7 @@ def predigest(text: str) -> str:
     for i, line in enumerate(lines):
         cls = classify_line(line)
         if cls.startswith("signal:"):
-            for j in range(max(0, i - 3), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
@@ -221,31 +230,21 @@ def predigest(text: str) -> str:
     while i < len(lines):
         line = lines[i]
 
-        # Level 2: Collapse health check blocks
-        health_re = re.compile(r'(health[yz]|readyz|livez)', re.IGNORECASE)
-        if health_re.search(line) and i not in error_lines:
-            count = 0
-            while i < len(lines) and health_re.search(lines[i]):
-                count += 1
-                i += 1
-            if count >= 3:
-                output.append(f"[HEALTH CHECKS: {count} lines, all OK]")
-                continue
-            else:
-                i -= count
-
-        # Level 2: Collapse leader election renewals
-        lease_re = re.compile(r"(renewed|acquired) lease")
-        if lease_re.search(line) and i not in error_lines:
-            count = 0
-            while i < len(lines) and lease_re.search(lines[i]):
-                count += 1
-                i += 1
-            if count >= 3:
-                output.append(f"[LEADER ELECTION: {count} renewals]")
-                continue
-            else:
-                i -= count
+        # Level 2: Config-driven simple block detectors
+        block_matched = False
+        if i not in error_lines:
+            for det in _BLOCK_DETECTORS:
+                if det.match_regex.search(line):
+                    count = 0
+                    while i + count < len(lines) and det.match_regex.search(lines[i + count]):
+                        count += 1
+                    if count >= det.min_count:
+                        output.append(det.summary_template.format(count=count))
+                        i += count
+                        block_matched = True
+                    break
+        if block_matched:
+            continue
 
         # Level 2: Collapse managedFields blocks
         if re.match(r"^\s*managedFields:", line) and i not in error_lines:
@@ -269,7 +268,7 @@ def predigest(text: str) -> str:
             continue
 
         # Level 3: Truncate large K8s API responses
-        if len(line) > 500 and any(m in line for m in K8S_BLOB_MARKERS):
+        if len(line) > _MAX_LINE_LEN and any(m in line for m in K8S_BLOB_MARKERS):
             kind_m = re.search(r"['\"]kind['\"]: ['\"](\w+)['\"]", line)
             name_m = re.search(r"['\"]name['\"]: ['\"]([\\w-]+)['\"]", line)
             ns_m = re.search(r"['\"]namespace['\"]: ['\"]([\\w-]+)['\"]", line)
@@ -306,7 +305,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -325,8 +324,8 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=3,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
             blob_handler=_blob_handler,
         )
     return "\n".join(output)
