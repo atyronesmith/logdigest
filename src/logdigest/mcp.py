@@ -79,7 +79,7 @@ def _load_domains() -> None:
             continue
 
         try:
-            ps = PatternSet.load(name)
+            ps = PatternSet.load(name, required=False)
             funcs[name] = mod.predigest
             if ps is not None:
                 sigs.append((name, ps.domain_keywords))

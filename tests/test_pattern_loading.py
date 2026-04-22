@@ -30,8 +30,12 @@ class TestPatternSetLoad:
         assert len(ps.noise_patterns) > 0
         assert len(ps.signal_patterns) > 0
 
-    def test_missing_domain_returns_none(self):
-        ps = PatternSet.load("nonexistent_domain_xyz")
+    def test_missing_domain_raises(self):
+        with pytest.raises(FileNotFoundError):
+            PatternSet.load("nonexistent_domain_xyz")
+
+    def test_missing_domain_returns_none_when_not_required(self):
+        ps = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps is None
 
     def test_explicit_missing_version_raises(self):
@@ -48,10 +52,10 @@ class TestPatternSetLoad:
         ps2 = PatternSet.load("ansible")
         assert ps1 is ps2
 
-    def test_cache_miss_returns_none(self):
-        ps1 = PatternSet.load("nonexistent_domain_xyz")
+    def test_cache_miss_not_required(self):
+        ps1 = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps1 is None
-        ps2 = PatternSet.load("nonexistent_domain_xyz")
+        ps2 = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps2 is None
 
     def test_clear_cache(self):

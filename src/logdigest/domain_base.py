@@ -174,20 +174,26 @@ class PatternSet:
         return result
 
     @classmethod
-    def load(cls, domain: str, version: str | None = None) -> PatternSet | None:
+    def load(
+        cls, domain: str, version: str | None = None, *, required: bool = True,
+    ) -> PatternSet | None:
         """Load patterns for a domain from JSON.
 
         Args:
             domain: Domain name (e.g., "ansible", "mustgather").
             version: None for baseline, "latest" for most recent
                 generated file, or explicit version string.
+            required: If True (default), raise FileNotFoundError when
+                the baseline pattern file is missing. If False, return
+                None — used by MCP discovery where partial availability
+                is acceptable.
 
         Returns:
-            PatternSet if found, None if file not found.
+            PatternSet, or None if not found and required=False.
 
         Raises:
-            FileNotFoundError: If an explicit version is requested
-                but the file does not exist.
+            FileNotFoundError: If the file does not exist and
+                required=True, or if an explicit version is requested.
             ValueError: If the JSON is malformed or contains
                 invalid regex patterns.
         """
@@ -196,6 +202,10 @@ class PatternSet:
             return cls._cache[cache_key]
 
         result = cls._load_uncached(domain, version)
+        if result is None and required:
+            raise FileNotFoundError(
+                f"Missing pattern file: patterns/{domain}.json"
+            )
         cls._cache[cache_key] = result
         return result
 
@@ -314,12 +324,12 @@ def classify_line(
         "noise:<label>", "signal:<label>", or "unknown".
     """
     stripped = line.strip()
-    for pattern, label in noise_patterns:
-        if pattern.search(stripped):
-            return f"noise:{label}"
     for pattern, label in signal_patterns:
         if pattern.search(stripped):
             return f"signal:{label}"
+    for pattern, label in noise_patterns:
+        if pattern.search(stripped):
+            return f"noise:{label}"
     return "unknown"
 
 

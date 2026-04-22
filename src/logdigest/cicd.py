@@ -30,9 +30,6 @@ from logdigest.domain_base import (
 # ---------------------------------------------------------------------------
 
 _ps = PatternSet.load("cicd")
-if _ps is None:
-    raise RuntimeError("Missing pattern file: patterns/cicd.json")
-
 NOISE_PATTERNS = _ps.noise_patterns
 SIGNAL_PATTERNS = _ps.signal_patterns
 

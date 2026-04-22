@@ -26,7 +26,7 @@ mcp = [
 ]
 
 [project.scripts]
-logdigest = "logdigest.cli:cli"
+logdigest = "logdigest.__main__:main"
 logdigest-mcp = "logdigest.mcp:main"
 
 [tool.hatch.build.targets.wheel]

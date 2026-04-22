@@ -29,10 +29,10 @@ def test_classify_unknown():
     assert classify_line("INFO: normal stuff", NOISE, SIGNAL) == "unknown"
 
 
-def test_classify_noise_takes_priority():
-    """If a line matches both noise and signal, noise wins (checked first)."""
+def test_classify_signal_takes_priority():
+    """If a line matches both noise and signal, signal wins."""
     both_noise = [*NOISE, (re.compile(r"^ERROR:"), "also_noise")]
-    assert classify_line("ERROR: something", both_noise, SIGNAL) == "noise:also_noise"
+    assert classify_line("ERROR: something", both_noise, SIGNAL) == "signal:error"
 
 
 def test_classify_strips_whitespace():

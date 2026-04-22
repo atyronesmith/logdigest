@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 
@@ -17,15 +18,18 @@ class TemplateCluster:
 
 
 def mine_templates(
-    lines: list[str],
+    lines: Iterable[str],
     depth: int = 4,
     similarity: float = 0.4,
     max_samples: int = 10,
 ) -> list[TemplateCluster]:
     """Run Drain3 over lines and return template clusters.
 
+    Lines are consumed incrementally — pass a generator or file iterator
+    to avoid loading the full corpus into memory.
+
     Args:
-        lines: Raw log lines to mine.
+        lines: Raw log lines to mine (any iterable).
         depth: Drain3 tree depth (higher = more specific templates).
         similarity: Drain3 similarity threshold (lower = more aggressive grouping).
         max_samples: Maximum sample lines to keep per cluster.
@@ -44,16 +48,19 @@ def mine_templates(
 
     miner = TemplateMiner(config=config)
 
+    total = 0
     samples: dict[int, list[str]] = {}
     for line in lines:
-        result = miner.add_log_message(line.strip())
+        stripped = line.strip()
+        result = miner.add_log_message(stripped)
+        total += 1
         cid = result["cluster_id"]
         if cid not in samples:
             samples[cid] = []
         if len(samples[cid]) < max_samples:
-            samples[cid].append(line.strip())
+            samples[cid].append(stripped)
 
-    total = len(lines) or 1
+    total = total or 1
     clusters = []
     for cluster in miner.drain.clusters:
         clusters.append(TemplateCluster(

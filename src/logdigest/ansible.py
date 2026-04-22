@@ -28,9 +28,6 @@ from logdigest.domain_base import (
 # ---------------------------------------------------------------------------
 
 _ps = PatternSet.load("ansible")
-if _ps is None:
-    raise RuntimeError("Missing pattern file: patterns/ansible.json")
-
 NOISE_PATTERNS = _ps.noise_patterns
 SIGNAL_PATTERNS = _ps.signal_patterns
 ANSIBLE_BLOB_MARKERS = _ps.blob_markers

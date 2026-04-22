@@ -1,26 +1,63 @@
-"""CLI entry point for logdigest."""
+"""Click-based CLI for logdigest discover.
+
+Requires the [discover] extra (click, drain3). Imported lazily by
+__main__.py — never at package-level.
+"""
 
 from __future__ import annotations
 
-import contextlib
 import json
-import sys
 from pathlib import Path
 
-try:
-    import click
-except ImportError:
-    print(
-        "Error: click is required for the logdigest CLI.\n"
-        "Install with: pip install logdigest[discover]",
-        file=sys.stderr,
-    )
-    raise SystemExit(1) from None
+import click
 
 
 @click.group()
 def cli():
     """logdigest - log pre-digestion toolkit."""
+
+
+def _collect_corpus(corpus_dir: str, max_file_mb: float) -> list[Path]:
+    """Collect text files from corpus directory, skipping oversized and binary files."""
+    corpus_path = Path(corpus_dir)
+    skip_suffixes = {".gz", ".tar", ".zip", ".bin", ".png", ".jpg"}
+    max_bytes = int(max_file_mb * 1024 * 1024)
+    valid = []
+    skipped_large = 0
+    skipped_read = 0
+
+    for f in sorted(corpus_path.rglob("*")):
+        if not f.is_file() or f.suffix in skip_suffixes:
+            continue
+        try:
+            if f.stat().st_size > max_bytes:
+                skipped_large += 1
+                continue
+            valid.append(f)
+        except OSError:
+            skipped_read += 1
+
+    if skipped_large:
+        click.echo(f"Skipped {skipped_large} files over {max_file_mb}MB")
+    if skipped_read:
+        click.echo(f"Skipped {skipped_read} unreadable files")
+    return valid
+
+
+def _iter_lines(files: list[Path]):
+    """Yield lines from files, streaming one file at a time."""
+    for f in files:
+        try:
+            with f.open(errors="replace") as fh:
+                for raw in fh:
+                    yield raw.rstrip("\n")
+        except OSError:
+            continue
+
+
+def _read_lines(files: list[Path]) -> list[str]:
+    """Read all lines from files into a list."""
+    return list(_iter_lines(files))
 
 
 @cli.command()
@@ -33,7 +70,11 @@ def cli():
 @click.option("--similarity", default=0.4, type=float, help="Drain3 similarity threshold.")
 @click.option("--split", default=0.2, type=float, help="Held-out validation fraction.")
 @click.option("--min-recall", default=0.5, type=float, help="Min recall ratio for validation (default: 0.5).")
-def discover(corpus_dir, domain, output, reference, min_frequency, depth, similarity, split, min_recall):
+@click.option("--max-file-mb", default=50.0, type=float, help="Skip files larger than this (MB, default: 50).")
+def discover(
+    corpus_dir, domain, output, reference, min_frequency,
+    depth, similarity, split, min_recall, max_file_mb,
+):
     """Discover noise/signal patterns from a corpus of log files."""
     try:
         from logdigest.discover.mining import mine_templates
@@ -58,19 +99,22 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
     from logdigest.entropy import corpus_entropy
 
     # 1. Load corpus
-    corpus_path = Path(corpus_dir)
-    files = sorted(f for f in corpus_path.rglob("*") if f.is_file()
-                   and f.suffix not in (".gz", ".tar", ".zip", ".bin", ".png", ".jpg"))
+    files = _collect_corpus(corpus_dir, max_file_mb)
     if not files:
         click.echo(f"No files found in {corpus_dir}", err=True)
         raise SystemExit(1)
 
     documents = []
+    corpus_bytes = 0
     for f in files:
-        with contextlib.suppress(OSError):
-            documents.append(f.read_text(errors="replace"))
+        try:
+            text = f.read_text(errors="replace")
+            corpus_bytes += len(text.encode("utf-8", errors="replace"))
+            documents.append(text)
+        except OSError:
+            continue
 
-    click.echo(f"Corpus: {len(documents)} files")
+    click.echo(f"Corpus: {len(documents)} files, {corpus_bytes / 1024 / 1024:.1f}MB")
 
     # 2. Entropy pre-flight
     metrics = corpus_entropy(documents)
@@ -79,22 +123,19 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
     if metrics["predicted_impact"] in ("none", "low"):
         click.echo("Warning: low redundancy — pattern discovery may not be effective.")
 
-    # 3. Train/test split
-    split_idx = max(1, int(len(documents) * (1 - split)))
-    train_docs = documents[:split_idx]
-    test_docs = documents[split_idx:]
+    # 3. Train/test split (by file, then stream lines)
+    split_idx = max(1, int(len(files) * (1 - split)))
+    train_files = files[:split_idx]
+    test_files = files[split_idx:]
 
-    train_lines = []
-    for doc in train_docs:
-        train_lines.extend(doc.splitlines())
-    test_lines = []
-    for doc in test_docs:
-        test_lines.extend(doc.splitlines())
+    del documents
 
-    click.echo(f"Training: {len(train_lines)} lines, Test: {len(test_lines)} lines")
+    # 4. Mine templates (streaming — lines never fully materialized)
+    clusters = mine_templates(_iter_lines(train_files), depth=depth, similarity=similarity)
+    train_line_count = sum(c.size for c in clusters)
+    test_lines = _read_lines(test_files)
 
-    # 4. Mine templates
-    clusters = mine_templates(train_lines, depth=depth, similarity=similarity)
+    click.echo(f"Training: {train_line_count} lines, Test: {len(test_lines)} lines")
     click.echo(f"Templates discovered: {len(clusters)}")
 
     # 5. Convert and classify
@@ -106,7 +147,7 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
         if regex is None:
             continue
         candidate = classify_template(
-            cluster, regex, len(train_lines), min_frequency=min_frequency,
+            cluster, regex, train_line_count, min_frequency=min_frequency,
         )
         if candidate.classification == "uncategorized":
             continue
@@ -147,7 +188,7 @@ def discover(corpus_dir, domain, output, reference, min_frequency, depth, simila
         click.echo(f"After validation: {len(noise)} noise, {len(signal)} signal")
 
     # 8. Export
-    data = export_pattern_set(domain, noise, signal, len(documents), conflicts or None)
+    data = export_pattern_set(domain, noise, signal, len(train_files) + len(test_files), conflicts or None)
 
     # Schema-validate before writing
     try:
