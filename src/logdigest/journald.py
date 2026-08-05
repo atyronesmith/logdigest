@@ -1,13 +1,12 @@
-"""Systemd journal pre-digestion: system log noise removal.
+"""Systemd journal pre-digestion: journalctl noise removal.
 
-journalctl output has per-entry boilerplate (timestamp, hostname, PID,
-facility) and massive noise from routine system operations — DHCP
-renewals, session management, cron execution, kernel informational.
+Patterns, block detectors, and thresholds are loaded from
+patterns/journald.json at import time.
 
 Three levels of compression:
-1. Line-level: strip noise lines (routine kernel, systemd, audit)
+1. Line-level: classify lines as noise/signal via regex patterns
 2. Block-level: collapse service restart loops, audit bursts
-3. Blob-level: truncate large kernel dmesg dumps, stack traces
+3. Blob-level: truncate large stack traces
 """
 
 from __future__ import annotations
@@ -15,101 +14,28 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from denoise.domain_base import (
+from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
-    # Blank / separator
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^-{5,}\s*(Reboot|Boot)?\s*-{0,}$"), "boot_separator"),
-    # Systemd lifecycle (successful)
-    (re.compile(r"Started .+\.$"), "service_started"),
-    (re.compile(r"Stopped .+\.$"), "service_stopped"),
-    (re.compile(r"Starting .+\.\.\.$"), "service_starting"),
-    (re.compile(r"Stopping .+\.\.\.$"), "service_stopping"),
-    (re.compile(r"Reached target .+\.$"), "target_reached"),
-    (re.compile(r"Listening on .+\.$"), "socket_listen"),
-    (re.compile(r"Mounted .+\.$"), "mount"),
-    (re.compile(r"Finished .+\.$"), "service_finished"),
-    # Session management
-    (re.compile(r"pam_unix.*session (opened|closed)"), "pam_session"),
-    (re.compile(r"New session \d+ of user"), "session_new"),
-    (re.compile(r"Removed session \d+"), "session_removed"),
-    (re.compile(r"session-\d+\.scope: Succeeded"), "session_scope"),
-    # DHCP / network
-    (re.compile(r"dhclient.*bound to", re.IGNORECASE), "dhcp"),
-    (re.compile(r"NetworkManager.*DHCP.*renewed", re.IGNORECASE), "dhcp"),
-    (re.compile(r"NetworkManager.*state change.*connected", re.IGNORECASE), "nm_connected"),
-    # Cron
-    (re.compile(r"CROND\[\d+\].*CMD"), "cron"),
-    (re.compile(r"run-parts.*starting"), "cron_parts"),
-    (re.compile(r"run-parts.*finished"), "cron_parts"),
-    (re.compile(r"anacron.*job.*started"), "anacron"),
-    # Audit routine ops
-    (re.compile(r"audit.*type=PROCTITLE"), "audit_proctitle"),
-    (re.compile(r"audit.*type=SYSCALL.*success=yes"), "audit_success"),
-    (re.compile(r"audit.*type=CWD"), "audit_cwd"),
-    (re.compile(r"audit.*type=PATH"), "audit_path"),
-    (re.compile(r"audit.*type=EOE"), "audit_eoe"),
-    # USB device events
-    (re.compile(r"usb.*new (full|high|low|super) speed"), "usb_device"),
-    (re.compile(r"usb.*USB disconnect"), "usb_disconnect"),
-    # Kernel informational
-    (re.compile(r"kernel:.*registered new interface driver"), "kernel_driver"),
-    (re.compile(r"kernel:.*loaded module"), "kernel_module"),
-    (re.compile(r"kernel:.*\blink (up|down)\b.*\bspeed\b"), "kernel_link"),
-    (re.compile(r"kernel:.*audit:.*initialized"), "kernel_audit_init"),
-    # Logrotate
-    (re.compile(r"logrotate.*rotating"), "logrotate"),
-    # Polkit
-    (re.compile(r"polkitd.*Registered"), "polkit"),
-    (re.compile(r"polkitd.*Unregistered"), "polkit"),
-    # Timestamp-only lines (some journal formats)
-    (re.compile(r"^-- .+ --$"), "journal_marker"),
-]
+_ps = PatternSet.load("journald")
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/journald.json")
 
-SIGNAL_PATTERNS = [
-    # OOM killer
-    (re.compile(r"Out of memory", re.IGNORECASE), "oom"),
-    (re.compile(r"oom-killer"), "oom"),
-    (re.compile(r"Kill process \d+"), "oom_kill"),
-    (re.compile(r"Killed process \d+"), "oom_kill"),
-    (re.compile(r"invoked oom-killer"), "oom"),
-    # Segfaults
-    (re.compile(r"segfault at"), "segfault"),
-    (re.compile(r"general protection fault"), "gpf"),
-    (re.compile(r"trap invalid opcode"), "invalid_opcode"),
-    # Service failures
-    (re.compile(r"Failed to start .+\.$"), "service_failed"),
-    (re.compile(r"\.service: Failed"), "service_failed"),
-    (re.compile(r"\.service: Main process exited, code=exited, status=[1-9]"), "service_exit_fail"),
-    (re.compile(r"\.service: Control process exited, code=exited, status=[1-9]"), "service_exit_fail"),
-    (re.compile(r"entered failed state"), "service_failed"),
-    # Disk errors
-    (re.compile(r"I/O error"), "io_error"),
-    (re.compile(r"ext[234].*error"), "fs_error"),
-    (re.compile(r"XFS.*error"), "fs_error"),
-    (re.compile(r"Buffer I/O error"), "io_error"),
-    (re.compile(r"SCSI error"), "scsi_error"),
-    # Kernel panics
-    (re.compile(r"Kernel panic"), "kernel_panic"),
-    (re.compile(r"BUG:"), "kernel_bug"),
-    (re.compile(r"WARNING:.*at "), "kernel_warning"),
-    (re.compile(r"Call Trace:"), "call_trace"),
-    # SELinux
-    (re.compile(r"avc:\s+denied"), "selinux_denied"),
-    (re.compile(r"SELinux.*denied"), "selinux_denied"),
-    # Coredumps
-    (re.compile(r"Process \d+ .+ dumped core"), "coredump"),
-    (re.compile(r"systemd-coredump.*dumped"), "coredump"),
-]
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
+_BLOCK_DETECTORS = _ps.block_detectors
 
 
 def classify_line(line: str) -> str:
@@ -193,20 +119,19 @@ def predigest(text: str, keep_timestamps: bool = False) -> str:
     for i, line in enumerate(lines):
         cls = classify_line(line)
         if cls.startswith("signal:"):
-            for j in range(max(0, i - 5), min(len(lines), i + 5)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
     i = 0
 
     service_re = re.compile(r"(Started|Stopped|Starting|Stopping|Failed to start) (.+?)[\.\s]*$")
-    audit_re = re.compile(r"audit\[\d+\]:")
 
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
 
-        # Level 2: Collapse service restart loops
+        # Level 2: Collapse service restart loops (complex — stays as code)
         m = service_re.search(stripped)
         if m and i not in error_lines:
             service = m.group(2)
@@ -225,18 +150,21 @@ def predigest(text: str, keep_timestamps: bool = False) -> str:
             else:
                 i = start
 
-        # Level 2: Collapse audit bursts
-        if audit_re.search(stripped) and i not in error_lines:
-            start = i
-            count = 0
-            while i < len(lines) and audit_re.search(lines[i]):
-                count += 1
-                i += 1
-            if count >= 5:
-                output.append(f"[AUDIT BLOCK: {count} entries]")
-                continue
-            else:
-                i = start
+        # Level 2: Config-driven simple block detectors
+        block_matched = False
+        if i not in error_lines:
+            for det in _BLOCK_DETECTORS:
+                if det.match_regex.search(stripped):
+                    count = 0
+                    while i + count < len(lines) and det.match_regex.search(lines[i + count]):
+                        count += 1
+                    if count >= det.min_count:
+                        output.append(det.summary_template.format(count=count))
+                        i += count
+                        block_matched = True
+                    break
+        if block_matched:
+            continue
 
         cls = classify_line(line)
 
@@ -286,7 +214,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -301,8 +229,8 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=5,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
         )
     return "\n".join(output)
 

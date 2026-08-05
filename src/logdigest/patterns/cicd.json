@@ -1,0 +1,355 @@
+{
+  "domain": "cicd",
+  "version": "baseline",
+  "generated": "2026-04-22T02:48:53Z",
+  "noise_patterns": [
+    {
+      "regex": "^\\s*$",
+      "label": "blank"
+    },
+    {
+      "regex": "^-{5,}$",
+      "label": "separator"
+    },
+    {
+      "regex": "^={5,}$",
+      "label": "separator"
+    },
+    {
+      "regex": "^\\*{5,}$",
+      "label": "separator"
+    },
+    {
+      "regex": "Downloading .+\\d+%",
+      "label": "download_progress"
+    },
+    {
+      "regex": "Extracting .+\\d+%",
+      "label": "extract_progress"
+    },
+    {
+      "regex": "^\\s*\\d+(\\.\\d+)?%\\s",
+      "label": "progress_pct"
+    },
+    {
+      "regex": "Receiving objects:\\s+\\d+%",
+      "label": "git_progress"
+    },
+    {
+      "regex": "Resolving deltas:\\s+\\d+%",
+      "label": "git_progress"
+    },
+    {
+      "regex": "^\\s*Collecting\\s",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Downloading\\s.*\\.whl",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Installing collected packages",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Successfully installed\\s",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Using cached\\s",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Requirement already satisfied",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^\\s*Building wheel",
+      "label": "pip_install"
+    },
+    {
+      "regex": "^added \\d+ packages",
+      "label": "npm_install"
+    },
+    {
+      "regex": "^npm warn",
+      "label": "npm_warn"
+    },
+    {
+      "regex": "^npm notice",
+      "label": "npm_notice"
+    },
+    {
+      "regex": "^\\s*npm http",
+      "label": "npm_install"
+    },
+    {
+      "regex": "^\\s*Setting up\\s",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Unpacking\\s",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Selecting previously",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Preparing to unpack",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Get:\\d+",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Reading package lists",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Building dependency tree",
+      "label": "apt_install"
+    },
+    {
+      "regex": "^\\s*Installed:\\s",
+      "label": "yum_install"
+    },
+    {
+      "regex": "^\\s*Installing\\s*:",
+      "label": "yum_install"
+    },
+    {
+      "regex": "^\\s*Verifying\\s*:",
+      "label": "yum_install"
+    },
+    {
+      "regex": "^\\s*Pulling from\\s",
+      "label": "container_pull"
+    },
+    {
+      "regex": "^\\s*Digest:\\s",
+      "label": "container_pull"
+    },
+    {
+      "regex": "^\\s*Status: Downloaded",
+      "label": "container_pull"
+    },
+    {
+      "regex": "^\\s*(Waiting|Downloading|Extracting|Pull complete|Already exists)\\s*$",
+      "label": "container_layer"
+    },
+    {
+      "regex": "^\\s*[a-f0-9]{12}: (Waiting|Downloading|Extracting|Pull complete|Already exists)",
+      "label": "container_layer"
+    },
+    {
+      "regex": "(?i)^\\s*Cache (restored|saved|not found)",
+      "label": "cache_op"
+    },
+    {
+      "regex": "(?i)^\\s*Post cache",
+      "label": "cache_op"
+    },
+    {
+      "regex": "^\\s*Received \\d+ of \\d+",
+      "label": "cache_op"
+    },
+    {
+      "regex": "^##\\[debug\\]",
+      "label": "gha_debug"
+    },
+    {
+      "regex": "^##\\[group\\]",
+      "label": "gha_group"
+    },
+    {
+      "regex": "^##\\[endgroup\\]",
+      "label": "gha_endgroup"
+    },
+    {
+      "regex": "^##\\[command\\]",
+      "label": "gha_command"
+    },
+    {
+      "regex": "^\\s*Syncing repository",
+      "label": "gha_checkout"
+    },
+    {
+      "regex": "^\\s*Deleting the contents",
+      "label": "gha_checkout"
+    },
+    {
+      "regex": "^\\s*Initializing the repository",
+      "label": "gha_checkout"
+    },
+    {
+      "regex": "^\\s*Fetching the repository",
+      "label": "gha_checkout"
+    },
+    {
+      "regex": "^\\s*Checking out\\s",
+      "label": "gha_checkout"
+    },
+    {
+      "regex": "^\\s*\\[command\\]",
+      "label": "gha_command"
+    },
+    {
+      "regex": "^\\s*Started by\\s",
+      "label": "jenkins_start"
+    },
+    {
+      "regex": "^\\s*Building on\\s",
+      "label": "jenkins_build"
+    },
+    {
+      "regex": "^\\s*Building in\\s",
+      "label": "jenkins_build"
+    },
+    {
+      "regex": "^\\s*Finished:\\s",
+      "label": "jenkins_finish"
+    },
+    {
+      "regex": "^\\s*Polling SCM",
+      "label": "jenkins_scm"
+    },
+    {
+      "regex": "^\\s*SCM polling completed",
+      "label": "jenkins_scm"
+    },
+    {
+      "regex": "^\\s*Running on\\s",
+      "label": "jenkins_agent"
+    },
+    {
+      "regex": "^\\s*Waiting for next available executor",
+      "label": "jenkins_agent"
+    },
+    {
+      "regex": "^\\s*\\[Pipeline\\]\\s*(Start|End|node|stage|sh|echo)",
+      "label": "jenkins_pipeline"
+    },
+    {
+      "regex": "^\\s*Using Docker executor",
+      "label": "gitlab_executor"
+    },
+    {
+      "regex": "^\\s*Getting source from\\s",
+      "label": "gitlab_source"
+    },
+    {
+      "regex": "^\\s*Checking out [a-f0-9]+ as",
+      "label": "gitlab_checkout"
+    },
+    {
+      "regex": "^\\s*Uploading artifacts",
+      "label": "gitlab_artifacts"
+    },
+    {
+      "regex": "^\\s*Uploading artifacts to coordinator",
+      "label": "gitlab_artifacts"
+    },
+    {
+      "regex": "^\\s*Restoring cache",
+      "label": "gitlab_cache"
+    },
+    {
+      "regex": "^\\s*Saving cache",
+      "label": "gitlab_cache"
+    },
+    {
+      "regex": "^\\s*\\$ echo",
+      "label": "gitlab_echo"
+    }
+  ],
+  "signal_patterns": [
+    {
+      "regex": "Process completed with exit code [1-9]",
+      "label": "exit_code"
+    },
+    {
+      "regex": "exit code [1-9]",
+      "label": "exit_code"
+    },
+    {
+      "regex": "exited with code [1-9]",
+      "label": "exit_code"
+    },
+    {
+      "regex": "(?i)^ERROR:",
+      "label": "error"
+    },
+    {
+      "regex": "(?i)^FATAL:",
+      "label": "fatal"
+    },
+    {
+      "regex": "^\\s*error\\[",
+      "label": "compiler_error"
+    },
+    {
+      "regex": "\\bFAILED\\b",
+      "label": "test_fail"
+    },
+    {
+      "regex": "^FAIL:",
+      "label": "test_fail"
+    },
+    {
+      "regex": "AssertionError",
+      "label": "assertion"
+    },
+    {
+      "regex": "AssertError",
+      "label": "assertion"
+    },
+    {
+      "regex": "error TS\\d+",
+      "label": "typescript_error"
+    },
+    {
+      "regex": "FAILURES",
+      "label": "test_fail_header"
+    },
+    {
+      "regex": "(?i)Build FAILED",
+      "label": "build_fail"
+    },
+    {
+      "regex": "(?i)COMPILATION ERROR",
+      "label": "build_fail"
+    },
+    {
+      "regex": "error\\[E\\d+\\]",
+      "label": "rust_error"
+    },
+    {
+      "regex": "(?i)Cancelling",
+      "label": "cancel"
+    },
+    {
+      "regex": "(?i)Timed out",
+      "label": "timeout"
+    },
+    {
+      "regex": "exceeded the maximum",
+      "label": "timeout"
+    },
+    {
+      "regex": "^##\\[error\\]",
+      "label": "gha_error"
+    },
+    {
+      "regex": "^##\\[warning\\]",
+      "label": "gha_warning"
+    }
+  ],
+  "config": {
+    "error_context": 3,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "domain_keywords": ["##[group]", "##[debug]", "[Pipeline]", "Using Docker executor", "Collecting ", "Successfully installed", "npm warn"]
+  }
+}

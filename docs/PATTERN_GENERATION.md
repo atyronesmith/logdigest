@@ -68,12 +68,12 @@ for cluster in miner.drain.clusters:
     frequency = cluster.size / total_lines
 ```
 
-**What Drain3 doesn't do — and where denoise adds value:**
+**What Drain3 doesn't do — and where logdigest adds value:**
 
 - **Block patterns (Level 2):** Drain3 operates on individual lines. It cannot detect that 47 consecutive `FAILED - RETRYING:` lines form a retry block that should collapse into `[RETRY: task, 47 retries, then succeeded]`. Block detection requires sequence-level analysis across lines.
 - **Blob patterns (Level 3):** Drain3 doesn't identify multi-kilobyte embedded structures (K8s API responses, base64 blobs, managedFields YAML) that should be truncated to one-line summaries.
 - **Noise/signal classification:** Drain3 discovers templates but doesn't classify them. The classification step (is this template noise or signal?) uses corpus-level line-frequency entropy from Operation 1 plus error-token heuristics.
-- **Domain-specific block/blob detectors:** Retry loop collapsing, item loop dedup, health-check block summarization, JSON blob truncation — these are denoise's contribution on top of Drain3's line-level templates.
+- **Domain-specific block/blob detectors:** Retry loop collapsing, item loop dedup, health-check block summarization, JSON blob truncation — these are logdigest's contribution on top of Drain3's line-level templates.
 
 **Operation 3: Character-level entropy per line.** Shannon entropy of the character distribution within a single line. Only useful as a filter for two edge cases: separator lines (`==========`, entropy near 0) and base64/hex blobs (entropy near 5.5+). Not a primary signal for pattern discovery.
 
@@ -119,71 +119,39 @@ Output is a JSON pattern set, not Python source:
 }
 ```
 
-Domain modules load patterns from JSON at import time, falling back to the current compiled defaults if no pattern file is present.
+Domain modules load patterns from JSON at import time. A missing pattern file raises `RuntimeError`.
 
 ### Schema Validation
 
 The `PatternSet` loader validates every pattern file against a JSON Schema on load, before attempting regex compilation. A malformed file (missing `label`, invalid regex syntax, wrong type for `confidence`) produces a clear validation error at load time, not a `re.error` deep in `classify_line()`.
 
-Schema ships as `denoise/schemas/pattern_set.schema.json`:
+Schema ships as `src/logdigest/schemas/pattern_set.schema.json` (see that file for the full definition). Key structure:
 
 ```json
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
   "required": ["domain", "generated", "noise_patterns", "signal_patterns"],
   "properties": {
-    "domain": { "type": "string" },
-    "version": { "type": "string" },
-    "generated": { "type": "string", "format": "date-time" },
-    "corpus_size": { "type": "integer", "minimum": 0 },
-    "noise_patterns": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/pattern" }
+    "domain": "string",
+    "generated": "date-time",
+    "noise_patterns": [{ "regex": "string", "label": "string", ... }],
+    "signal_patterns": [{ "regex": "string", "label": "string", ... }],
+    "config": {
+      "error_context": "integer",
+      "max_line_len": "integer",
+      "file_streaming_threshold_mb": "integer",
+      "blob_markers": ["string"],
+      "block_detectors": [{ "name", "regex", "min_count", "summary_template" }],
+      "domain_keywords": ["string"]
     },
-    "signal_patterns": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/pattern" }
-    },
-    "baseline_entropy": {
-      "type": "object",
-      "description": "Logprob baseline histogram for drift detection"
-    },
-    "conflicts": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/conflict" }
-    }
-  },
-  "$defs": {
-    "pattern": {
-      "type": "object",
-      "required": ["regex", "label"],
-      "properties": {
-        "regex": { "type": "string" },
-        "label": { "type": "string", "pattern": "^[a-z_]+$" },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "corpus_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
-        "stale": { "type": "boolean" },
-        "stale_cycles": { "type": "integer", "minimum": 0 }
-      }
-    },
-    "conflict": {
-      "type": "object",
-      "required": ["pattern", "existing_class", "proposed_class", "action"],
-      "properties": {
-        "pattern": { "type": "string" },
-        "existing_class": { "enum": ["noise", "signal"] },
-        "proposed_class": { "enum": ["noise", "signal"] },
-        "reason": { "type": "string" },
-        "action": { "enum": ["blocked", "promoted", "added"] },
-        "requires": { "type": "string" }
-      }
-    }
+    "baseline_entropy": "object",
+    "conflicts": [{ "pattern", "existing_class", "proposed_class", "action" }]
   }
 }
 ```
 
-The loader additionally validates that every `regex` field compiles successfully via `re.compile()` after schema validation passes. Schema validation uses stdlib `json` for parsing; the `jsonschema` package is an optional dependency (`pip install denoise[dev]`). If `jsonschema` is not installed, the loader skips schema validation and falls back to regex-compile-time error checking only, with a warning.
+Labels match `^[a-z][a-z0-9_]*$`. Pattern entries may also include `confidence`, `corpus_frequency`, `stale`, and `stale_cycles` fields for automated pattern generation.
+
+The loader additionally validates that every `regex` field compiles successfully via `re.compile()` after schema validation passes. Schema validation uses stdlib `json` for parsing; the `jsonschema` package is an optional dependency (`pip install logdigest[dev]`). If `jsonschema` is not installed, the loader skips schema validation and falls back to regex-compile-time error checking only, with a warning.
 
 ### Implementation
 
@@ -195,7 +163,7 @@ drift discover <corpus_dir> --domain ansible -o patterns.json
 
 Pipeline: `corpus_entropy` → line frequency analysis → prefix clustering → regex generation → validation → export.
 
-New in denoise:
+New in logdigest:
 
 - `PatternSet` class in `domain_base.py` that loads from JSON or falls back to compiled defaults
 - Each domain module switches from `NOISE_PATTERNS = [...]` to `NOISE_PATTERNS = PatternSet.load("ansible")`
@@ -238,7 +206,7 @@ Version markers to extract (for metadata, not necessarily for pattern routing):
 Byte-range segmentation (assigning each range to one domain) is the wrong abstraction for this. Instead, apply all detected domain pattern sets to every line, with per-line priority ordering:
 
 ```python
-from denoise import classify_log
+from logdigest import classify_log
 
 result = classify_log(text)
 # {
@@ -257,7 +225,7 @@ This needs prototyping on real multi-domain logs (CI-running-Ansible is the test
 Start with one pattern file per domain. Only create version-specific files when empirical divergence is observed (unknown_pct difference > 5% between versions on the same domain).
 
 ```
-denoise/
+logdigest/
   patterns/
     ansible.json        # covers all 2.x — split only if versions diverge
     mustgather.json     # covers all OCP 4.x
@@ -406,7 +374,7 @@ The operator reviews the conflict report. The pattern stays signal until explici
 ### Configuration
 
 ```python
-from denoise import PatternManager
+from logdigest import PatternManager
 
 manager = PatternManager(
     patterns_dir="patterns/",
@@ -420,15 +388,15 @@ manager = PatternManager(
 )
 ```
 
-### What denoise owns vs. what drift owns
+### What logdigest owns vs. what drift owns
 
 | Concern | Owner | Cost |
 |---------|-------|------|
-| Runtime classification counters | denoise | Free (per-line increment) |
-| unknown_pct threshold check | denoise | Free (division on check interval) |
-| Unclassified line buffering | denoise | Memory only (rolling window) |
-| Pattern set loading and hot-reload | denoise | Startup + on trigger |
-| Domain/version classification | denoise | Free (keyword scoring) |
+| Runtime classification counters | logdigest | Free (per-line increment) |
+| unknown_pct threshold check | logdigest | Free (division on check interval) |
+| Unclassified line buffering | logdigest | Memory only (rolling window) |
+| Pattern set loading and hot-reload | logdigest | Startup + on trigger |
+| Domain/version classification | logdigest | Free (keyword scoring) |
 | `drift discover` (corpus → patterns) | drift | CPU (Drain3 + regex gen) |
 | `drift probe` (logprob confirmation) | drift | LLM inference (on-demand only) |
 | JSD comparison against baseline | drift | Negligible (histogram math) |
@@ -436,7 +404,7 @@ manager = PatternManager(
 
 ## Implementation Order
 
-1. **Phase 1a** — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in denoise (patterns still hand-authored, but externalized from Python source)
+1. **Phase 1a** — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in logdigest (patterns still hand-authored, but externalized from Python source)
 2. **Phase 1b** — `drift discover` command (corpus → pattern JSON)
 3. **Phase 1c** — Re-derive current hand-authored patterns via the pipeline, proving the loop works
 4. **Phase 2a** — Version detection in `classify_log()`

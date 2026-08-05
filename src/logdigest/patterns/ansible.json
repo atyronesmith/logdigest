@@ -1,0 +1,180 @@
+{
+  "domain": "ansible",
+  "version": "baseline",
+  "generated": "2026-04-22T02:48:53Z",
+  "noise_patterns": [
+    {
+      "regex": "^ok: \\[",
+      "label": "ok"
+    },
+    {
+      "regex": "^skipping: \\[",
+      "label": "skipping"
+    },
+    {
+      "regex": "^changed: \\[",
+      "label": "changed"
+    },
+    {
+      "regex": "^included: ",
+      "label": "included"
+    },
+    {
+      "regex": "^\\w+day \\d{2} \\w+ \\d{4}\\s+\\d{2}:\\d{2}:\\d{2}",
+      "label": "timestamp"
+    },
+    {
+      "regex": "^Starting galaxy (role|collection) install",
+      "label": "galaxy"
+    },
+    {
+      "regex": "^- (downloading|extracting|installing) role",
+      "label": "galaxy"
+    },
+    {
+      "regex": "^Process install dependency map",
+      "label": "galaxy"
+    },
+    {
+      "regex": "^(Starting|Rewriting) requirements",
+      "label": "galaxy"
+    },
+    {
+      "regex": "^Vault password",
+      "label": "vault"
+    },
+    {
+      "regex": "^\\s*$",
+      "label": "blank"
+    },
+    {
+      "regex": "^FAILED - RETRYING:",
+      "label": "retry"
+    },
+    {
+      "regex": "^[\\w_\\- :]+ -{3,} \\d+\\.\\d+s$",
+      "label": "recap_timing"
+    },
+    {
+      "regex": "^\\[DEPRECATION WARNING\\]",
+      "label": "deprecation"
+    },
+    {
+      "regex": "^This feature will be removed",
+      "label": "deprecation"
+    },
+    {
+      "regex": "^\\[WARNING\\]:",
+      "label": "warning"
+    },
+    {
+      "regex": "^\\}$",
+      "label": "json_close"
+    },
+    {
+      "regex": "^\\{$",
+      "label": "json_open"
+    },
+    {
+      "regex": "^\\},?$",
+      "label": "json_close"
+    },
+    {
+      "regex": "^\"changed\": (true|false),?$",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^\"msg\": \"(All assertions passed|Pre-Workload tasks completed|Workload Tasks completed|Post-Workload Tasks completed|Step \\d+)",
+      "label": "json_success_msg"
+    },
+    {
+      "regex": "^\"ansible_loop_var\"",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^\"status\": \"CREATE_COMPLETE\"",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^\"status_reason\": null",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^\"data\": \\{",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^\"group_id\":",
+      "label": "json_frag"
+    },
+    {
+      "regex": "^skipping: no hosts matched",
+      "label": "no_hosts"
+    },
+    {
+      "regex": "already installed in EE",
+      "label": "galaxy_ee"
+    },
+    {
+      "regex": "^={10,}",
+      "label": "separator"
+    },
+    {
+      "regex": "^NO MORE HOSTS LEFT",
+      "label": "no_hosts"
+    },
+    {
+      "regex": "^TASKS RECAP",
+      "label": "recap"
+    },
+    {
+      "regex": "^\"msg\": \"Starting CSV: \"",
+      "label": "json_frag"
+    }
+  ],
+  "signal_patterns": [
+    {
+      "regex": "^fatal: \\[",
+      "label": "fatal"
+    },
+    {
+      "regex": "^FAILED!",
+      "label": "failed"
+    },
+    {
+      "regex": "^ERROR",
+      "label": "error"
+    },
+    {
+      "regex": "^PLAY \\[",
+      "label": "play_header"
+    },
+    {
+      "regex": "^TASK \\[",
+      "label": "task_header"
+    },
+    {
+      "regex": "^PLAY RECAP",
+      "label": "play_recap"
+    },
+    {
+      "regex": "^    \\\"msg\\\":",
+      "label": "error_msg"
+    },
+    {
+      "regex": "^    \\\"stderr\\\":",
+      "label": "stderr"
+    },
+    {
+      "regex": "^    \\\"rc\\\":",
+      "label": "return_code"
+    }
+  ],
+  "config": {
+    "error_context": 5,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "blob_markers": ["'metadata':", "\"metadata\":", "'spec':", "\"spec\":", "fieldsV1"],
+    "domain_keywords": ["PLAY [", "TASK [", "ok: [", "fatal: [", "PLAY RECAP"]
+  }
+}

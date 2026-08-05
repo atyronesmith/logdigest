@@ -1,13 +1,12 @@
 """OpenShift must-gather pre-digestion: cluster diagnostic noise removal.
 
-Must-gather bundles contain pod logs, event JSONs, resource YAMLs, and
-operator logs. 80-90% is boilerplate — health checks, leader election
-renewals, informer syncs, and full K8s API response blobs.
+Patterns, block detectors, and thresholds are loaded from
+patterns/mustgather.json at import time.
 
 Three levels of compression:
-1. Line-level: strip noise lines (health checks, leader election, informer sync)
-2. Block-level: collapse repeated patterns into summaries
-3. Blob-level: truncate K8s API responses, managedFields, large ConfigMaps
+1. Line-level: classify lines as noise/signal via regex patterns
+2. Block-level: collapse health checks, leader election, managedFields
+3. Blob-level: truncate K8s API responses and large embedded data
 """
 
 from __future__ import annotations
@@ -15,7 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from denoise.domain_base import (
+from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
@@ -23,92 +23,21 @@ from denoise.domain_base import (
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
-    # Health checks
-    (re.compile(r'"GET /health[yz]'), "healthz"),
-    (re.compile(r'"GET /readyz'), "readyz"),
-    (re.compile(r'"GET /livez'), "livez"),
-    (re.compile(r"health check (passed|ok|200)", re.IGNORECASE), "healthcheck"),
-    # Leader election
-    (re.compile(r"successfully (acquired|renewed) lease"), "leader_election"),
-    (re.compile(r"lock is held by .+ and has not yet expired"), "leader_election"),
-    # Informer / reflector
-    (re.compile(r"caches populated"), "informer"),
-    (re.compile(r"(Starting|Stopping) shared informer"), "informer"),
-    (re.compile(r"Listing and watching"), "informer"),
-    (re.compile(r"Watch close"), "informer"),
-    (re.compile(r"watch chan closed"), "informer"),
-    # Client-go throttling
-    (re.compile(r"Throttling request"), "throttle"),
-    (re.compile(r"client rate limiter"), "throttle"),
-    # Reconciliation no-ops
-    (re.compile(r"Reconcil(ing|ed).*no changes", re.IGNORECASE), "reconcile_noop"),
-    (re.compile(r"skipping reconcil", re.IGNORECASE), "reconcile_skip"),
-    # YAML metadata noise
-    (re.compile(r"^\s*resourceVersion:"), "yaml_meta"),
-    (re.compile(r"^\s*uid:"), "yaml_meta"),
-    (re.compile(r"^\s*creationTimestamp:"), "yaml_meta"),
-    (re.compile(r"^\s*selfLink:"), "yaml_meta"),
-    (re.compile(r"^\s*managedFields:"), "managed_fields"),
-    (re.compile(r"^\s*- manager:"), "managed_fields"),
-    (re.compile(r"^\s*operation:"), "managed_fields"),
-    (re.compile(r"^\s*fieldsType:"), "managed_fields"),
-    (re.compile(r"^\s*fieldsV1:"), "managed_fields"),
-    (re.compile(r'^\s*f:'), "managed_fields"),
-    # Event recorder boilerplate
-    (re.compile(r"Event\(v1\.ObjectReference"), "event_recorder"),
-    # TLS / cert rotation
-    (re.compile(r"certificate signed by unknown authority"), "cert_bootstrap"),
-    (re.compile(r"TLS handshake error"), "tls_noise"),
-    (re.compile(r"serving cert rotation"), "cert_rotation"),
-    # Blank / separator lines
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^-{5,}$"), "separator"),
-    (re.compile(r"^={5,}$"), "separator"),
-    # Operator SDK / controller-runtime
-    (re.compile(r"controller-runtime.*Starting EventSource"), "controller_rt"),
-    (re.compile(r"controller-runtime.*Starting Controller"), "controller_rt"),
-    (re.compile(r"controller-runtime.*Starting workers"), "controller_rt"),
-    # API request logging (non-error)
-    (re.compile(r'"(GET|LIST|WATCH)" .* 200'), "api_200"),
-    # Prometheus metrics scrape
-    (re.compile(r"GET /metrics"), "metrics_scrape"),
-]
+_ps = PatternSet.load("mustgather")
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/mustgather.json")
 
-SIGNAL_PATTERNS = [
-    # Errors
-    (re.compile(r"level=error", re.IGNORECASE), "error"),
-    (re.compile(r"level=fatal", re.IGNORECASE), "fatal"),
-    (re.compile(r"\bE\d{4}\b"), "klog_error"),
-    (re.compile(r"^E[0-9]{4} "), "klog_error"),
-    # Panics / crashes
-    (re.compile(r"panic:"), "panic"),
-    (re.compile(r"goroutine \d+ \["), "goroutine"),
-    (re.compile(r"signal SIGSEGV"), "sigsegv"),
-    # OOM
-    (re.compile(r"OOMKilled"), "oom"),
-    (re.compile(r"Out of memory", re.IGNORECASE), "oom"),
-    (re.compile(r"memory cgroup out of memory"), "oom"),
-    # Pod failures
-    (re.compile(r"CrashLoopBackOff"), "crashloop"),
-    (re.compile(r"Back-off restarting"), "crashloop"),
-    (re.compile(r"ErrImagePull"), "image_pull"),
-    (re.compile(r"ImagePullBackOff"), "image_pull"),
-    (re.compile(r"Evicted"), "eviction"),
-    # Node conditions
-    (re.compile(r"NotReady"), "node_not_ready"),
-    (re.compile(r"node condition.*pressure", re.IGNORECASE), "node_pressure"),
-    # Operator degraded
-    (re.compile(r"Degraded.*True", re.IGNORECASE), "degraded"),
-    (re.compile(r"Available.*False", re.IGNORECASE), "unavailable"),
-    # API errors
-    (re.compile(r'"(GET|LIST|WATCH|PUT|POST|DELETE)" .* (4\d\d|5\d\d)'), "api_error"),
-    # Warning events
-    (re.compile(r"type.*Warning", re.IGNORECASE), "warning_event"),
-]
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+K8S_BLOB_MARKERS = _ps.blob_markers
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
+_BLOCK_DETECTORS = _ps.block_detectors
 
 
 def classify_line(line: str) -> str:
@@ -176,16 +105,6 @@ def find_managed_fields_blocks(lines: list[str]) -> list[dict]:
 # Level 3: Large embedded data detection
 # ---------------------------------------------------------------------------
 
-K8S_BLOB_MARKERS = [
-    "'metadata':",
-    '"metadata":',
-    "'spec':",
-    '"spec":',
-    "fieldsV1",
-    "managedFields",
-]
-
-
 def find_k8s_blobs(lines: list[str], min_chars: int = 500) -> list[dict]:
     """Find lines containing large K8s API response data."""
     return find_large_blobs(lines, min_chars=min_chars, markers=K8S_BLOB_MARKERS)
@@ -207,7 +126,7 @@ def predigest(text: str) -> str:
     for i, line in enumerate(lines):
         cls = classify_line(line)
         if cls.startswith("signal:"):
-            for j in range(max(0, i - 3), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
@@ -216,31 +135,21 @@ def predigest(text: str) -> str:
     while i < len(lines):
         line = lines[i]
 
-        # Level 2: Collapse health check blocks
-        health_re = re.compile(r'(health[yz]|readyz|livez)', re.IGNORECASE)
-        if health_re.search(line) and i not in error_lines:
-            count = 0
-            while i < len(lines) and health_re.search(lines[i]):
-                count += 1
-                i += 1
-            if count >= 3:
-                output.append(f"[HEALTH CHECKS: {count} lines, all OK]")
-                continue
-            else:
-                i -= count
-
-        # Level 2: Collapse leader election renewals
-        lease_re = re.compile(r"(renewed|acquired) lease")
-        if lease_re.search(line) and i not in error_lines:
-            count = 0
-            while i < len(lines) and lease_re.search(lines[i]):
-                count += 1
-                i += 1
-            if count >= 3:
-                output.append(f"[LEADER ELECTION: {count} renewals]")
-                continue
-            else:
-                i -= count
+        # Level 2: Config-driven simple block detectors
+        block_matched = False
+        if i not in error_lines:
+            for det in _BLOCK_DETECTORS:
+                if det.match_regex.search(line):
+                    count = 0
+                    while i + count < len(lines) and det.match_regex.search(lines[i + count]):
+                        count += 1
+                    if count >= det.min_count:
+                        output.append(det.summary_template.format(count=count))
+                        i += count
+                        block_matched = True
+                    break
+        if block_matched:
+            continue
 
         # Level 2: Collapse managedFields blocks
         if re.match(r"^\s*managedFields:", line) and i not in error_lines:
@@ -264,7 +173,7 @@ def predigest(text: str) -> str:
             continue
 
         # Level 3: Truncate large K8s API responses
-        if len(line) > 500 and any(m in line for m in K8S_BLOB_MARKERS):
+        if len(line) > _MAX_LINE_LEN and any(m in line for m in K8S_BLOB_MARKERS):
             kind_m = re.search(r"['\"]kind['\"]: ['\"](\w+)['\"]", line)
             name_m = re.search(r"['\"]name['\"]: ['\"]([\\w-]+)['\"]", line)
             ns_m = re.search(r"['\"]namespace['\"]: ['\"]([\\w-]+)['\"]", line)
@@ -301,7 +210,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -320,39 +229,45 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=3,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
             blob_handler=_blob_handler,
         )
     return "\n".join(output)
 
 
-def predigest_bundle(bundle_dir: Path) -> dict[str, str]:
+def predigest_bundle(bundle_dir: Path) -> dict:
     """Pre-digest an extracted must-gather bundle directory.
 
-    Walks the directory, applies per-file pre-digestion to text files,
-    and returns a dict of {relative_path: compressed_text}.
-
+    Walks the directory, applies per-file pre-digestion to text files.
     Uses streaming for files >50MB to avoid OOM on large pod logs.
+
+    Returns:
+        Dict with "files" (relative_path → compressed_text) and
+        "skipped" (list of {"file": path, "reason": str} for files
+        that could not be processed).
     """
-    results = {}
+    files = {}
+    skipped = []
     for filepath in sorted(bundle_dir.rglob("*")):
         if not filepath.is_file():
             continue
         if filepath.suffix in (".gz", ".tar", ".zip", ".png", ".jpg", ".bin"):
             continue
+        rel = str(filepath.relative_to(bundle_dir))
         try:
             size = filepath.stat().st_size
             if size == 0:
                 continue
             result = predigest_file(filepath)
             if result.strip():
-                rel = str(filepath.relative_to(bundle_dir))
-                results[rel] = result
-        except (OSError, UnicodeDecodeError):
-            continue
+                files[rel] = result
+        except OSError as e:
+            skipped.append({"file": rel, "reason": str(e)})
+        except UnicodeDecodeError as e:
+            skipped.append({"file": rel, "reason": f"encoding: {e.encoding}"})
 
-    return results
+    return {"files": files, "skipped": skipped}
 
 
 def analyze_log(filepath: Path) -> dict:

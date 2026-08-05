@@ -2,7 +2,7 @@
 
 import re
 
-from denoise.domain_base import classify_line, analyze_lines, find_large_blobs
+from logdigest.domain_base import classify_line, analyze_lines, find_large_blobs
 
 
 NOISE = [

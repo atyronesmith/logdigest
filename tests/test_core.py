@@ -1,6 +1,6 @@
 """Tests for denoise core pre-digestion functions."""
 
-from denoise.core import (
+from logdigest.core import (
     build_boilerplate_set,
     dedup_documents,
     is_separator_line,

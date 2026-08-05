@@ -1,6 +1,6 @@
 """Tests for denoise entropy pre-flight diagnostic."""
 
-from denoise.entropy import line_entropy, corpus_entropy, entropy_report
+from logdigest.entropy import line_entropy, corpus_entropy, entropy_report
 
 
 def test_line_entropy_empty():
