@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "logdigest": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "logdigest"],
-      "env": {}
-    }
-  }
-}

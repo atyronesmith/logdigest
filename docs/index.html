@@ -140,7 +140,7 @@
 </head>
 <body>
 <div class="container">
-  <h1>de<span>noise</span></h1>
+  <h1>log<span>digest</span></h1>
   <p class="tagline">Task-aware pre-digestion for RAG and LLM pipelines. Strip the noise before it costs you tokens.</p>
 
   <div class="hero-links">
@@ -153,7 +153,7 @@
     <li>Removes boilerplate, duplicates, and low-entropy content from document corpora</li>
     <li>Domain-specific modules for Ansible, OpenShift must-gather, CI/CD, and systemd logs</li>
     <li>Entropy pre-flight to predict impact before you build anything</li>
-    <li>Safety guard optimization — tiered classification eliminates most LLM guard calls</li>
+    <li>Automated pattern discovery from log corpora via <code>logdigest discover</code></li>
     <li>Zero runtime dependencies — pure Python 3.11+</li>
   </ul>
 
@@ -165,9 +165,9 @@
       <span class="stat">83% reduction</span>
     </div>
     <div class="card">
-      <h3>Guard Calls Eliminated</h3>
-      <p>Tiered classifier skips LLM safety checks on safe content</p>
-      <span class="stat">84% fewer calls</span>
+      <h3>Domain Modules</h3>
+      <p>Ansible, must-gather, CI/CD, and journald pre-digesters</p>
+      <span class="stat">4 domains</span>
     </div>
     <div class="card">
       <h3>Quality Impact</h3>
@@ -183,9 +183,11 @@
 
   <h2>Documentation</h2>
   <ul>
-    <li><a href="PREDIGESTION.html">Pre-digestion theory and results</a> — entropy bounds, 83% token savings</li>
-    <li><a href="GUARD.html">Guard module</a> — tiered classification, training weights</li>
-    <li><a href="CONTINUOUS_CALIBRATION.html">Continuous calibration</a> — runtime drift detection</li>
+    <li><a href="https://github.com/atyronesmith/logdigest/blob/main/docs/PREDIGESTION.md">Pre-digestion theory and results</a> — entropy bounds, 83% token savings</li>
+    <li><a href="https://github.com/atyronesmith/logdigest/blob/main/docs/PATTERN_GENERATION.md">Automated pattern generation</a> — corpus-driven discovery, drift detection</li>
+    <li><a href="https://github.com/atyronesmith/logdigest/blob/main/docs/RELATED_WORK.md">Related work</a> — Drain3, LLMLingua, MCP ecosystem</li>
+    <li><a href="https://github.com/atyronesmith/drift/blob/main/docs/GUARD.md">Guard module (drift)</a> — tiered classification, training weights</li>
+    <li><a href="https://github.com/atyronesmith/drift/blob/main/docs/CONTINUOUS_CALIBRATION.md">Continuous calibration (drift)</a> — runtime drift monitoring</li>
   </ul>
 
   <footer>

@@ -8,3 +8,8 @@ build/
 .env
 results/
 datasets/
+.DS_Store
+.coverage
+.pytest_cache/
+.mcp.json
+.claude/
