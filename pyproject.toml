@@ -19,7 +19,7 @@ Repository = "https://github.com/atyronesmith/denoise"
 [project.optional-dependencies]
 rag = ["numpy"]
 benchmarks = ["numpy", "datasets"]
-dev = ["pytest"]
+dev = ["pytest", "jsonschema"]
 mcp = [
     "fastmcp>=3.2.3",
 ]

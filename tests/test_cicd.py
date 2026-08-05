@@ -4,6 +4,7 @@ from denoise.cicd import (
     classify_line,
     detect_ci_system,
     predigest,
+    predigest_file_streaming,
     find_install_blocks,
     find_container_pull_blocks,
 )
@@ -261,3 +262,69 @@ def test_predigest_no_noise():
     result = predigest(log)
     assert "step 1" in result
     assert "step 2" in result
+
+
+# ---------------------------------------------------------------------------
+# Streaming pre-digestion
+# ---------------------------------------------------------------------------
+
+def test_streaming_strips_noise(tmp_path):
+    log = "\n".join([
+        "##[group] Run tests",
+        "  Collecting requests>=2.0",
+        "  Successfully installed requests-2.28",
+        "normal output line",
+        "more normal output",
+        "more normal output",
+        "more normal output",
+        "more normal output",
+        "##[debug] some debug info",
+    ])
+    path = tmp_path / "ci.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "##[group]" not in result
+    assert "##[debug]" not in result
+    assert "normal output" in result
+
+
+def test_streaming_preserves_errors(tmp_path):
+    log = "\n".join([
+        "##[group] Run tests",
+        "normal line",
+        "normal line",
+        "FAILED tests/test_something.py::test_it",
+        "ERROR: 1 failed, 5 passed",
+        "##[error] Process completed with exit code 1",
+    ])
+    path = tmp_path / "ci.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "FAILED" in result
+    assert "ERROR:" in result
+
+
+def test_streaming_matches_inmemory(tmp_path):
+    log = "\n".join([
+        "##[group] Checkout",
+        "##[endgroup]",
+        "normal build output",
+        "more build output",
+        "more build output",
+        "more build output",
+        "more build output",
+        "more build output",
+        "more build output",
+        "FAILED tests/test_it.py",
+        "final line",
+    ])
+    path = tmp_path / "ci.log"
+    path.write_text(log)
+
+    inmem = predigest(log)
+    streamed = predigest_file_streaming(path)
+
+    assert "FAILED" in inmem
+    assert "FAILED" in streamed
+    assert "##[group]" not in inmem
+    assert "##[group]" not in streamed

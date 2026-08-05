@@ -3,6 +3,7 @@
 from denoise.journald import (
     classify_line,
     predigest,
+    predigest_file_streaming,
     find_service_restart_loops,
     find_audit_bursts,
 )
@@ -294,3 +295,75 @@ def test_predigest_no_noise():
     result = predigest(log)
     assert "custom app line 1" in result
     assert "custom app line 2" in result
+
+
+# ---------------------------------------------------------------------------
+# Streaming pre-digestion
+# ---------------------------------------------------------------------------
+
+def test_streaming_strips_noise(tmp_path):
+    log = "\n".join([
+        "Started OpenSSH Server.",
+        "pam_unix(sshd:session): session opened for user root",
+        "New session 42 of user admin",
+        "some custom application log line",
+        "another application log line",
+        "another application log line",
+        "another application log line",
+        "another application log line",
+        "another application log line",
+        "another application log line",
+        "another application log line",
+        "CROND[1234]: (root) CMD (/usr/sbin/logrotate)",
+    ])
+    path = tmp_path / "journal.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "OpenSSH" not in result
+    assert "pam_unix" not in result
+    assert "CROND" not in result
+    assert "custom application" in result
+
+
+def test_streaming_preserves_errors(tmp_path):
+    log = "\n".join([
+        "Started My Service.",
+        "normal line",
+        "normal line",
+        "myapp.service: Main process exited, code=exited, status=1",
+        "Failed to start My Service.",
+        "I/O error, dev sda, sector 1234",
+    ])
+    path = tmp_path / "journal.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "exited, status=1" in result
+    assert "I/O error" in result
+
+
+def test_streaming_matches_inmemory(tmp_path):
+    log = "\n".join([
+        "Started OpenSSH Server.",
+        "custom app log",
+        "another custom log",
+        "more custom logs",
+        "yet more custom logs",
+        "still more custom logs",
+        "even more custom logs",
+        "and more custom logs",
+        "and still more custom logs",
+        "and even more logs",
+        "and yet more logs",
+        "myapp.service: Main process exited, code=exited, status=1",
+        "final line",
+    ])
+    path = tmp_path / "journal.log"
+    path.write_text(log)
+
+    inmem = predigest(log)
+    streamed = predigest_file_streaming(path)
+
+    assert "exited, status=1" in inmem
+    assert "exited, status=1" in streamed
+    assert "OpenSSH" not in inmem
+    assert "OpenSSH" not in streamed
