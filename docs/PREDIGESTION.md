@@ -126,10 +126,10 @@ Impact is inversely proportional to document entropy. If `predicted_impact` is "
 
 ## Relationship to Drift
 
-**logdigest** is the **runtime library** for pre-digestion. The drift sibling project is where the research, experimentation, and validation happen.
+**logdigest** is the **runtime library** for pre-digestion. The [drift](https://github.com/atyronesmith/drift) sibling project is where the research, experimentation, and validation happen.
 
 - Drift measures *whether* pre-digestion helps for a given corpus (entropy analysis, quality comparisons)
 - logdigest *implements* the pre-digestion that drift validates
-- Drift's `drift probe` and `drift distill` commands train classifiers that logdigest runs at inference time
+- Guard classification, drift monitoring, and classifier training live in drift (`src/drift/safety/`), not in logdigest
 
-For full experiment details, see the drift repo's `docs/PAPER.md` and `docs/RESULTS.md`.
+For full experiment details, see the drift repo's `docs/PAPER.md` and `docs/RESULTS.md`. For guard and continuous calibration docs, see drift's `docs/GUARD.md` and `docs/CONTINUOUS_CALIBRATION.md`.

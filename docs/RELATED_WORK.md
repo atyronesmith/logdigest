@@ -35,7 +35,7 @@ LLMLingua is the better choice when the input is free-form natural language with
 
 ## ML Drift Detection
 
-**Alibi Detect, NannyML, Evidently** are production ML monitoring platforms with drift detection (KS tests, MMD, ADWIN, etc.). logdigest's pattern drift monitor (`PATTERN_GENERATION.md` Phase 3) implements JSD on a single specific distribution (mean-token-entropy from logprob probes) as a stdlib-only subset for embedded deployment. It is not a general-purpose drift detection framework.
+**Alibi Detect, NannyML, Evidently** are production ML monitoring platforms with drift detection (KS tests, MMD, ADWIN, etc.). logdigest's pattern drift monitor (`PATTERN_GENERATION.md` Phase 3) uses a simpler, direct signal: `unknown_pct` — the fraction of lines matching neither noise nor signal patterns. This is a free counter increment on every classification, with no ML dependencies. An earlier design considered JSD on logprob distributions for semantic drift detection, but investigation showed `unknown_pct` alone is sufficient and avoids coupling pattern maintenance to LLM inference.
 
 ## Log Anomaly Detection
 

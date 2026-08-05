@@ -30,3 +30,10 @@ python -m pytest -v
 - Functional style — prefer stateless functions
 - All public functions need docstrings and type hints
 - Lint with `ruff check src/ tests/` before submitting (config in `pyproject.toml`)
+
+## What Not to Commit
+
+- `.env` files (API keys, credentials)
+- `.mcp.json` (local Claude Code MCP config — see README for an example)
+- `results/` and `datasets/` (experiment outputs and downloaded corpora)
+- `.coverage`, `.DS_Store`

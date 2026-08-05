@@ -15,10 +15,6 @@
       "type": "array",
       "items": { "$ref": "#/$defs/pattern" }
     },
-    "baseline_entropy": {
-      "type": "object",
-      "description": "Logprob baseline histogram for drift detection"
-    },
     "conflicts": {
       "type": "array",
       "items": { "$ref": "#/$defs/conflict" }

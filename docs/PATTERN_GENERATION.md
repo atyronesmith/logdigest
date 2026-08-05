@@ -2,15 +2,17 @@
 
 ## Status: Phase 1b Complete
 
-The current NOISE_PATTERNS and SIGNAL_PATTERNS in each domain module are hand-authored by domain experts examining log samples. This document describes the pipeline to automate pattern discovery, version-aware routing, and live updates.
+NOISE_PATTERNS and SIGNAL_PATTERNS for each domain are loaded from JSON files (`src/logdigest/patterns/*.json`) via `PatternSet.load()`. These pattern sets can be generated automatically from a log corpus using `logdigest discover`, or hand-authored. The shipped baseline patterns were originally hand-authored; new domains should use the discovery pipeline.
+
+This document describes the full pipeline: pattern discovery (implemented), version-aware routing (planned), and live drift detection via `unknown_pct` monitoring (planned). An earlier design included logprob-based escalation for semantic drift detection; this was investigated and deprioritized — see Phase 3 for rationale.
 
 ## Problem
 
 Static regex lists have three weaknesses:
 
-1. **Provenance** — no automated trail from corpus to patterns. Patterns appear hand-rolled to outside readers.
+1. **Provenance** — no automated trail from corpus to patterns.
 2. **Staleness** — log formats change across versions (Ansible 2.14 vs 2.16, RHEL 8 vs 9 systemd). Static patterns drift silently.
-3. **Scope** — adding a new domain requires a human to read logs and write regex. Doesn't scale.
+3. **Scope** — adding a new domain requires reading logs and writing regex manually. `logdigest discover` automates this.
 
 ## Architecture
 
@@ -29,7 +31,7 @@ Three components, built incrementally:
                        │ routed patterns
 ┌──────────────────────▼──────────────────────────────────┐
 │  Phase 3: Live Drift Detection                          │
-│  runtime stats → logprob monitoring → re-derive trigger │
+│  runtime stats → unknown_pct monitoring → re-derive     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -85,7 +87,7 @@ Drain3 emits templates with `<*>` wildcards (e.g., `ok: [<*>]`). Convert these t
 2. **Prefix-wildcard templates** → prefix regex (e.g., `ok: [<*>]` → `^ok: \[`)
 3. **Multi-wildcard templates** → structural regex with `.*?` or `\S+` at wildcard positions, with proper escaping and anchoring
 
-The template-to-regex conversion is inspired by drift's `autogen._generate_regex()`, but that code targets JSON field extraction from LLM outputs — different input structure, different assumptions about what's variable vs. invariant. `drift discover` is a new pipeline, not a refactor of autogen.
+The template-to-regex conversion is implemented in `src/logdigest/discover/regex_convert.py`.
 
 Each generated regex is validated against all members of the Drain3 cluster it came from, plus cross-checked against signal clusters to prevent false matches.
 
@@ -119,7 +121,7 @@ Output is a JSON pattern set, not Python source:
 }
 ```
 
-Domain modules load patterns from JSON at import time. A missing pattern file raises `RuntimeError`.
+Domain modules load patterns from JSON at import time via `PatternSet.load()`, which raises `FileNotFoundError` if the pattern file is missing.
 
 ### Schema Validation
 
@@ -143,7 +145,6 @@ Schema ships as `src/logdigest/schemas/pattern_set.schema.json` (see that file f
       "block_detectors": [{ "name", "regex", "min_count", "summary_template" }],
       "domain_keywords": ["string"]
     },
-    "baseline_entropy": "object",
     "conflicts": [{ "pattern", "existing_class", "proposed_class", "action" }]
   }
 }
@@ -159,24 +160,30 @@ The loader additionally validates that every `regex` field compiles successfully
 logdigest discover <corpus_dir> --domain ansible -o patterns.json
 ```
 
-Pipeline: corpus loading → entropy pre-flight → train/test split → Drain3 mining → template-to-regex → noise/signal classification → conflict resolution → held-out validation → export.
+Pipeline: corpus loading → file size guard → entropy pre-flight → train/test split → Drain3 mining (streaming) → template-to-regex → noise/signal classification → conflict resolution → held-out validation → export.
 
 Implementation:
 
-- `logdigest discover` CLI command in `src/logdigest/cli.py` (Click-based)
-- Discovery pipeline in `src/logdigest/discover/` subpackage (mining, regex_convert, classifier, validation, export)
+- `logdigest discover` CLI command in `src/logdigest/cli.py` (Click-based, lazy-imported via `__main__.py`)
+- Discovery pipeline in `src/logdigest/discover/` subpackage:
+  - `mining.py` — Drain3 wrapper, accepts any `Iterable[str]` for streaming
+  - `regex_convert.py` — template-to-regex conversion (exact, prefix, multi-wildcard)
+  - `classifier.py` — noise/signal classification, conflict resolution using real sample lines
+  - `validation.py` — held-out test set validation with recall and safety checks
+  - `export.py` — JSON export matching `pattern_set.schema.json`
 - `PatternSet` class in `domain_base.py` loads from JSON with schema validation
-- Each domain module uses `PatternSet.load("ansible")` instead of hardcoded lists
+- Each domain module uses `PatternSet.load("ansible")` at import time
+- Runtime classification checks signal patterns before noise (signal always wins)
 
-**Version resolution in `PatternSet.load(domain, version=None)`:**
+**Version resolution in `PatternSet.load(domain, version=None, *, required=True)`:**
 
 | `version` argument | Behavior |
 |---------------------|----------|
-| `None` (default) | Load the hand-authored baseline (`ansible.json`). This is the current compiled pattern list, exported to JSON — known-good, manually validated. |
+| `None` (default) | Load the baseline (`ansible.json`). Raises `FileNotFoundError` if missing (unless `required=False`). |
 | `"latest"` | Load the most recently generated pattern file for this domain (by `generated` timestamp in the JSON). Falls back to baseline if no generated files exist. |
 | `"2.16"` (explicit) | Load the named version file. Error if not found — no silent fallback when a specific version is requested. |
 
-The baseline file is always the hand-authored patterns. Generated files from `drift discover` are stored alongside it but never replace it. `None` (baseline) is the safe default for any deployment that hasn't run the discovery pipeline.
+The baseline file can be hand-authored or generated by `logdigest discover`. Generated files from discovery are validated against the schema and can replace or augment the baseline.
 
 ## Phase 2: Domain/Version Classifier
 
@@ -262,39 +269,25 @@ class DigestStats:
 
 logdigest buffers unclassified lines in a rolling window. When `unknown_pct` crosses the threshold (default 0.25), it triggers the escalation path.
 
-### Escalation: Logprob Confirmation (expensive, on-demand only)
+### Logprob Escalation — Investigated, Not Pursuing
 
-`unknown_pct` catches syntactic drift — new line formats the patterns don't match. But it misses semantic drift: patterns still match, but the content they're stripping has changed in ways that hurt downstream quality. For example, Ansible 2.17 might use the same `ok: [host]` format but restructure task output so that stripping `ok:` lines now removes context the LLM needs.
+The original Phase 3 design included a logprob escalation step: after `unknown_pct` triggers, run `drift probe` on sampled pre-digested logs, capture per-token logprobs on the LLM's output, and compare the entropy distribution (via JSD) against a baseline established at pattern generation time. The hypothesis was that logprobs could detect *semantic* drift — cases where patterns still match syntactically but the content they strip has changed in ways that hurt downstream LLM quality.
 
-Logprob probing detects this — but it requires running an LLM over sampled logs and capturing per-token logprobs, which has real inference cost. Running it continuously as parallel monitoring is not worth the overhead. Instead, it runs only as a confirmation step after `unknown_pct` triggers.
+**Why we're not building this:**
 
-**The escalation flow:**
+1. **The signal logprobs provide is indirect.** Logprobs measure the LLM's confidence on its *output*, not the quality of the *input*. For log pre-digestion, the question is "did we strip something the LLM needed?" — that's directly observable by comparing task output quality with and without pre-digestion, which is cheaper than a logprob probe pipeline.
 
-```
-unknown_pct crosses threshold
-        │
-        ▼
-Collect buffered unclassified lines
-        │
-        ▼
-Run drift probe on N sampled pre-digested logs (N=20-50)
-        │
-        ▼
-Compare against baseline → confirm or dismiss
-```
+2. **The cost is disproportionate to the risk.** Logprob probing requires running an LLM over sampled logs, which has real inference cost. The scenario it detects (patterns match but content semantics shifted) is rare in practice — log format changes almost always manifest as new line formats that `unknown_pct` catches directly.
 
-**What the baseline is, specifically:** At pattern generation time (`drift discover`), run `drift probe` on 50 pre-digested logs from the training corpus. For each log, the LLM generates a structured summary (the same task the patterns are optimizing for). `drift probe` records per-token logprobs on the LLM's output. Compute the mean token entropy per log (average of `-log2(p)` across all output tokens). The baseline is the distribution of these 50 mean-entropy values — stored as a histogram in the pattern set's JSON alongside the patterns themselves.
+3. **`unknown_pct` alone is sufficient for practical drift detection.** A rising fraction of unclassified lines is a strong, free, direct signal that patterns are stale. Combined with automated re-derivation via `logdigest discover`, this provides a complete self-maintenance loop without LLM inference in the monitoring path.
 
-**What the confirmation probe measures:** Run the same `drift probe` on 20-50 recently pre-digested logs. Compute the same per-log mean token entropy. Compare the two distributions via JSD.
+4. **Reproducibility concerns.** Logprob baselines are model-specific — changing the downstream LLM invalidates the baseline, creating a coupling between pattern maintenance and model selection that adds operational complexity without clear benefit.
 
-- **Low JSD** (< 0.10): the LLM is equally "surprised" by current pre-digested content as it was at training time. The `unknown_pct` spike is probably benign — new log lines that are genuinely ambiguous but not hurting quality. Buffer them for the next scheduled re-derivation but don't trigger an urgent one.
-- **High JSD** (> 0.15): the LLM is systematically more surprised. Pre-digestion is stripping content the LLM now needs, or passing through noise it shouldn't. Trigger re-derivation.
-
-This keeps continuous monitoring free (counters only) and pays the LLM inference cost only when there's already evidence of a problem.
+Logprob-based analysis remains valuable in drift's core use case (identifying deterministic output fields for hybrid extraction). It is the wrong tool for input-side pre-digestion quality monitoring, where mechanical approaches (frequency-based classification, `unknown_pct` tracking) answer the relevant questions directly and cheaply.
 
 ### Re-derivation
 
-When triggered (unknown_pct threshold crossed + logprob confirmation):
+When `unknown_pct` crosses the threshold:
 
 ```
 ┌──────────────────────────────┐
@@ -303,9 +296,9 @@ When triggered (unknown_pct threshold crossed + logprob confirmation):
 └──────────┬───────────────────┘
            ▼
 ┌──────────────────────────────┐
-│ drift discover <buffer>      │
+│ logdigest discover <buffer>  │
 │   --domain <detected>        │
-│   --base <current.json>      │
+│   --reference <current.json> │
 └──────────┬───────────────────┘
            ▼
 ┌──────────────────────────────┐
@@ -321,7 +314,6 @@ When triggered (unknown_pct threshold crossed + logprob confirmation):
 ┌──────────────────────────────┐
 │ Hot-reload patterns.json     │
 │ Reset unknown_pct baseline   │
-│ Store new logprob baseline   │
 └──────────────────────────────┘
 ```
 
@@ -380,37 +372,31 @@ manager = PatternManager(
     patterns_dir="patterns/",
     unknown_threshold=0.25,       # unknown_pct trigger level
     buffer_size=5000,             # unclassified lines to retain
-    auto_rediscover=False,        # True = run drift discover automatically
-    # Logprob escalation (only runs after unknown_pct trigger)
-    probe_sample_size=30,         # logs to probe for confirmation
-    jsd_confirm_threshold=0.15,   # JSD above this = confirmed drift
-    jsd_dismiss_threshold=0.10,   # JSD below this = benign, defer
+    auto_rediscover=False,        # True = run logdigest discover automatically
 )
 ```
 
-### What logdigest owns vs. what drift owns
+### What logdigest owns
 
-| Concern | Owner | Cost |
-|---------|-------|------|
-| Runtime classification counters | logdigest | Free (per-line increment) |
-| unknown_pct threshold check | logdigest | Free (division on check interval) |
-| Unclassified line buffering | logdigest | Memory only (rolling window) |
-| Pattern set loading and hot-reload | logdigest | Startup + on trigger |
-| Domain/version classification | logdigest | Free (keyword scoring) |
-| `drift discover` (corpus → patterns) | drift | CPU (Drain3 + regex gen) |
-| `drift probe` (logprob confirmation) | drift | LLM inference (on-demand only) |
-| JSD comparison against baseline | drift | Negligible (histogram math) |
-| Pattern validation against held-out corpus | drift | CPU (regex matching) |
+| Concern | Cost |
+|---------|------|
+| Runtime classification counters | Free (per-line increment) |
+| unknown_pct threshold check | Free (division on check interval) |
+| Unclassified line buffering | Memory only (rolling window) |
+| Pattern set loading and hot-reload | Startup + on trigger |
+| Domain/version classification | Free (keyword scoring) |
+| `logdigest discover` (corpus → patterns) | CPU (Drain3 + regex gen) |
+| Pattern validation against held-out corpus | CPU (regex matching) |
 
 ## Implementation Order
 
-1. **Phase 1a** ✅ — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation in logdigest (patterns still hand-authored, but externalized from Python source)
-2. **Phase 1b** ✅ — `logdigest discover` command (corpus → pattern JSON). Lives in logdigest, not drift, so discovery can eventually run continuously without depending on the experiment harness.
-3. **Phase 1c** — Re-derive current hand-authored patterns via the pipeline, proving the loop works
+1. **Phase 1a** ✅ — JSON pattern format + JSON Schema + `PatternSet` loader with schema validation. Domain modules load patterns from JSON via `PatternSet.load()`.
+2. **Phase 1b** ✅ — `logdigest discover` command (corpus → pattern JSON) with streaming Drain3 mining, conflict resolution using real sample lines, and held-out validation.
+3. **Phase 1c** — Re-derive baseline patterns via the pipeline on each domain's reference corpus, validating that discovered patterns match or improve on the originals.
 4. **Phase 2a** — Version detection in `classify_log()`
 5. **Phase 2b** — Version-specific pattern sets (start with Ansible 2.14 vs 2.16)
 6. **Phase 3a** — Runtime `DigestStats` + unknown_pct monitoring + unclassified line buffering
-7. **Phase 3b** — Logprob escalation path (on-demand `drift probe` after unknown_pct trigger)
-8. **Phase 3c** — Auto re-derivation with hot-reload
+7. ~~**Phase 3b** — Logprob escalation path~~ — Investigated, not pursuing (see above).
+8. **Phase 3b** — Auto re-derivation with hot-reload
 
-Each phase is independently useful. Phase 1 alone answers the reviewer's provenance question. Phase 2 handles the multi-version/multi-domain concern. Phase 3 makes the system self-maintaining — with continuous monitoring that costs nothing and expensive confirmation only when there's reason to suspect a problem.
+Each phase is independently useful. Phase 1 alone answers the reviewer's provenance question. Phase 2 handles the multi-version/multi-domain concern. Phase 3 makes the system self-maintaining with continuous monitoring that costs nothing — `unknown_pct` alone is sufficient to trigger re-derivation without LLM inference in the monitoring path.
