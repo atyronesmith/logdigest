@@ -1,6 +1,6 @@
 """Tests for denoise must-gather pre-digestion."""
 
-from denoise.mustgather import (
+from logdigest.mustgather import (
     classify_line,
     predigest,
     predigest_file_streaming,

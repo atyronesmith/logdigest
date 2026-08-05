@@ -1,6 +1,6 @@
 """Tests for denoise systemd journal pre-digestion."""
 
-from denoise.journald import (
+from logdigest.journald import (
     classify_line,
     predigest,
     predigest_file_streaming,

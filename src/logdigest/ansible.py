@@ -1,11 +1,10 @@
 """Ansible log pre-digestion: domain-specific noise removal.
 
-Ansible job logs are 70-90% noise — ok/skipping/changed lines, retry
-blocks, item loops, and embedded K8s API responses. This module strips
-all of it, preserving only error context and play structure.
+Patterns and thresholds are loaded from patterns/ansible.json at
+import time.
 
 Three levels of compression:
-1. Line-level: strip noise lines (ok, skipping, changed, timestamps, etc.)
+1. Line-level: classify lines as noise/signal via regex patterns
 2. Block-level: collapse retry blocks and item loops into summaries
 3. Blob-level: truncate large embedded data (K8s API responses, base64)
 """
@@ -13,7 +12,8 @@ Three levels of compression:
 import re
 from pathlib import Path
 
-from denoise.domain_base import (
+from logdigest.domain_base import (
+    PatternSet,
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
@@ -21,55 +21,20 @@ from denoise.domain_base import (
 )
 
 # ---------------------------------------------------------------------------
-# Level 1: Line-level classification
+# Load patterns and config from JSON (shipped with the package)
 # ---------------------------------------------------------------------------
 
-NOISE_PATTERNS = [
-    (re.compile(r"^ok: \["), "ok"),
-    (re.compile(r"^skipping: \["), "skipping"),
-    (re.compile(r"^changed: \["), "changed"),
-    (re.compile(r"^included: "), "included"),
-    (re.compile(r"^\w+day \d{2} \w+ \d{4}\s+\d{2}:\d{2}:\d{2}"), "timestamp"),
-    (re.compile(r"^Starting galaxy (role|collection) install"), "galaxy"),
-    (re.compile(r"^- (downloading|extracting|installing) role"), "galaxy"),
-    (re.compile(r"^Process install dependency map"), "galaxy"),
-    (re.compile(r"^(Starting|Rewriting) requirements"), "galaxy"),
-    (re.compile(r"^Vault password"), "vault"),
-    (re.compile(r"^\s*$"), "blank"),
-    (re.compile(r"^FAILED - RETRYING:"), "retry"),
-    (re.compile(r"^[\w_\- :]+ -{3,} \d+\.\d+s$"), "recap_timing"),
-    (re.compile(r"^\[DEPRECATION WARNING\]"), "deprecation"),
-    (re.compile(r"^This feature will be removed"), "deprecation"),
-    (re.compile(r"^\[WARNING\]:"), "warning"),
-    (re.compile(r"^\}$"), "json_close"),
-    (re.compile(r"^\{$"), "json_open"),
-    (re.compile(r"^\},?$"), "json_close"),
-    (re.compile(r'^"changed": (true|false),?$'), "json_frag"),
-    (re.compile(r'^"msg": "(All assertions passed|Pre-Workload tasks completed|Workload Tasks completed|Post-Workload Tasks completed|Step \d+)'), "json_success_msg"),
-    (re.compile(r'^"ansible_loop_var"'), "json_frag"),
-    (re.compile(r'^"status": "CREATE_COMPLETE"'), "json_frag"),
-    (re.compile(r'^"status_reason": null'), "json_frag"),
-    (re.compile(r'^"data": \{'), "json_frag"),
-    (re.compile(r'^"group_id":'), "json_frag"),
-    (re.compile(r"^skipping: no hosts matched"), "no_hosts"),
-    (re.compile(r"already installed in EE"), "galaxy_ee"),
-    (re.compile(r"^={10,}"), "separator"),
-    (re.compile(r"^NO MORE HOSTS LEFT"), "no_hosts"),
-    (re.compile(r"^TASKS RECAP"), "recap"),
-    (re.compile(r'^"msg": "Starting CSV: "'), "json_frag"),
-]
+_ps = PatternSet.load("ansible")
+if _ps is None:
+    raise RuntimeError("Missing pattern file: patterns/ansible.json")
 
-SIGNAL_PATTERNS = [
-    (re.compile(r"^fatal: \["), "fatal"),
-    (re.compile(r"^FAILED!"), "failed"),
-    (re.compile(r"^ERROR"), "error"),
-    (re.compile(r"^PLAY \["), "play_header"),
-    (re.compile(r"^TASK \["), "task_header"),
-    (re.compile(r"^PLAY RECAP"), "play_recap"),
-    (re.compile(r"^    \"msg\":"), "error_msg"),
-    (re.compile(r"^    \"stderr\":"), "stderr"),
-    (re.compile(r"^    \"rc\":"), "return_code"),
-]
+NOISE_PATTERNS = _ps.noise_patterns
+SIGNAL_PATTERNS = _ps.signal_patterns
+ANSIBLE_BLOB_MARKERS = _ps.blob_markers
+
+_ERROR_CONTEXT = _ps.error_context
+_MAX_LINE_LEN = _ps.max_line_len
+_STREAMING_THRESHOLD = _ps.file_streaming_threshold_mb * 1024 * 1024
 
 
 def classify_line(line: str) -> str:
@@ -167,7 +132,7 @@ def predigest(text: str) -> str:
         stripped = line.strip()
         if (stripped.startswith("fatal:") or stripped.startswith("FAILED!")
                 or stripped.startswith("failed:") or "UNREACHABLE!" in stripped):
-            for j in range(max(0, i - 5), min(len(lines), i + 3)):
+            for j in range(max(0, i - _ERROR_CONTEXT), min(len(lines), i + _ERROR_CONTEXT)):
                 error_lines.add(j)
 
     output = []
@@ -219,9 +184,7 @@ def predigest(text: str) -> str:
             continue
 
         # Level 3: Truncate huge K8s API responses
-        if len(line) > 500 and (
-            "'metadata':" in line or '"metadata":' in line or "fieldsV1" in line
-        ):
+        if len(line) > _MAX_LINE_LEN and any(m in line for m in ANSIBLE_BLOB_MARKERS):
             m = re.search(r"'kind': '(\w+)'", line) or re.search(r'"kind": "(\w+)"', line)
             kind = m.group(1) if m else "resource"
             m = re.search(r"'name': '([\w-]+)'", line) or re.search(r'"name": "([\w-]+)"', line)
@@ -236,15 +199,6 @@ def predigest(text: str) -> str:
         i += 1
 
     return "\n".join(output)
-
-
-ANSIBLE_BLOB_MARKERS = [
-    "'metadata':",
-    '"metadata":',
-    "'spec':",
-    '"spec":',
-    "fieldsV1",
-]
 
 
 def _blob_handler(line: str) -> str | None:
@@ -267,7 +221,7 @@ def predigest_file(filepath: Path) -> str:
     uses streaming to avoid OOM.
     """
     size = filepath.stat().st_size
-    if size > 50 * 1024 * 1024:
+    if size > _STREAMING_THRESHOLD:
         return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
@@ -282,8 +236,8 @@ def predigest_file_streaming(filepath: Path) -> str:
             noise_patterns=NOISE_PATTERNS,
             signal_patterns=SIGNAL_PATTERNS,
             sink=output,
-            error_context=5,
-            max_line_len=500,
+            error_context=_ERROR_CONTEXT,
+            max_line_len=_MAX_LINE_LEN,
             blob_handler=_blob_handler,
         )
     return "\n".join(output)

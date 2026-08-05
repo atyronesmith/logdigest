@@ -3,7 +3,7 @@
 Tests the tool functions directly (not the MCP transport layer).
 """
 
-from denoise.mcp import predigest, detect_domain, entropy_check, _detect_domain
+from logdigest.mcp import predigest, detect_domain, entropy_check, _detect_domain
 
 
 # ---------------------------------------------------------------------------

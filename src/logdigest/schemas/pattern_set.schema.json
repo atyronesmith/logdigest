@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["domain", "generated", "noise_patterns", "signal_patterns"],
+  "properties": {
+    "domain": { "type": "string" },
+    "version": { "type": "string" },
+    "generated": { "type": "string", "format": "date-time" },
+    "corpus_size": { "type": "integer", "minimum": 0 },
+    "noise_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "signal_patterns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "baseline_entropy": {
+      "type": "object",
+      "description": "Logprob baseline histogram for drift detection"
+    },
+    "conflicts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conflict" }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "error_context": { "type": "integer", "minimum": 0 },
+        "max_line_len": { "type": "integer", "minimum": 1 },
+        "file_streaming_threshold_mb": { "type": "integer", "minimum": 1 },
+        "blob_markers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "block_detectors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/block_detector" }
+        },
+        "domain_keywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "required": ["regex", "label"],
+      "properties": {
+        "regex": { "type": "string" },
+        "label": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "corpus_frequency": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stale": { "type": "boolean" },
+        "stale_cycles": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "required": ["pattern", "existing_class", "proposed_class", "action"],
+      "properties": {
+        "pattern": { "type": "string" },
+        "existing_class": { "enum": ["noise", "signal"] },
+        "proposed_class": { "enum": ["noise", "signal"] },
+        "reason": { "type": "string" },
+        "action": { "enum": ["blocked", "promoted", "added"] },
+        "requires": { "type": "string" }
+      }
+    },
+    "block_detector": {
+      "type": "object",
+      "required": ["name", "regex", "min_count", "summary_template"],
+      "properties": {
+        "name": { "type": "string" },
+        "regex": { "type": "string" },
+        "min_count": { "type": "integer", "minimum": 1 },
+        "summary_template": {
+          "type": "string",
+          "description": "Template with {count} placeholder"
+        }
+      }
+    }
+  }
+}

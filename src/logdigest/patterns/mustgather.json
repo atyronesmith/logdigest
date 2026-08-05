@@ -1,0 +1,262 @@
+{
+  "domain": "mustgather",
+  "version": "baseline",
+  "generated": "2026-04-22T02:48:53Z",
+  "noise_patterns": [
+    {
+      "regex": "\"GET /health[yz]",
+      "label": "healthz"
+    },
+    {
+      "regex": "\"GET /readyz",
+      "label": "readyz"
+    },
+    {
+      "regex": "\"GET /livez",
+      "label": "livez"
+    },
+    {
+      "regex": "(?i)health check (passed|ok|200)",
+      "label": "healthcheck"
+    },
+    {
+      "regex": "successfully (acquired|renewed) lease",
+      "label": "leader_election"
+    },
+    {
+      "regex": "lock is held by .+ and has not yet expired",
+      "label": "leader_election"
+    },
+    {
+      "regex": "caches populated",
+      "label": "informer"
+    },
+    {
+      "regex": "(Starting|Stopping) shared informer",
+      "label": "informer"
+    },
+    {
+      "regex": "Listing and watching",
+      "label": "informer"
+    },
+    {
+      "regex": "Watch close",
+      "label": "informer"
+    },
+    {
+      "regex": "watch chan closed",
+      "label": "informer"
+    },
+    {
+      "regex": "Throttling request",
+      "label": "throttle"
+    },
+    {
+      "regex": "client rate limiter",
+      "label": "throttle"
+    },
+    {
+      "regex": "(?i)Reconcil(ing|ed).*no changes",
+      "label": "reconcile_noop"
+    },
+    {
+      "regex": "(?i)skipping reconcil",
+      "label": "reconcile_skip"
+    },
+    {
+      "regex": "^\\s*resourceVersion:",
+      "label": "yaml_meta"
+    },
+    {
+      "regex": "^\\s*uid:",
+      "label": "yaml_meta"
+    },
+    {
+      "regex": "^\\s*creationTimestamp:",
+      "label": "yaml_meta"
+    },
+    {
+      "regex": "^\\s*selfLink:",
+      "label": "yaml_meta"
+    },
+    {
+      "regex": "^\\s*managedFields:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "^\\s*- manager:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "^\\s*operation:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "^\\s*fieldsType:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "^\\s*fieldsV1:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "^\\s*f:",
+      "label": "managed_fields"
+    },
+    {
+      "regex": "Event\\(v1\\.ObjectReference",
+      "label": "event_recorder"
+    },
+    {
+      "regex": "certificate signed by unknown authority",
+      "label": "cert_bootstrap"
+    },
+    {
+      "regex": "TLS handshake error",
+      "label": "tls_noise"
+    },
+    {
+      "regex": "serving cert rotation",
+      "label": "cert_rotation"
+    },
+    {
+      "regex": "^\\s*$",
+      "label": "blank"
+    },
+    {
+      "regex": "^-{5,}$",
+      "label": "separator"
+    },
+    {
+      "regex": "^={5,}$",
+      "label": "separator"
+    },
+    {
+      "regex": "controller-runtime.*Starting EventSource",
+      "label": "controller_rt"
+    },
+    {
+      "regex": "controller-runtime.*Starting Controller",
+      "label": "controller_rt"
+    },
+    {
+      "regex": "controller-runtime.*Starting workers",
+      "label": "controller_rt"
+    },
+    {
+      "regex": "\"(GET|LIST|WATCH)\" .* 200",
+      "label": "api_200"
+    },
+    {
+      "regex": "GET /metrics",
+      "label": "metrics_scrape"
+    }
+  ],
+  "signal_patterns": [
+    {
+      "regex": "(?i)level=error",
+      "label": "error"
+    },
+    {
+      "regex": "(?i)level=fatal",
+      "label": "fatal"
+    },
+    {
+      "regex": "\\bE\\d{4}\\b",
+      "label": "klog_error"
+    },
+    {
+      "regex": "^E[0-9]{4} ",
+      "label": "klog_error"
+    },
+    {
+      "regex": "panic:",
+      "label": "panic"
+    },
+    {
+      "regex": "goroutine \\d+ \\[",
+      "label": "goroutine"
+    },
+    {
+      "regex": "signal SIGSEGV",
+      "label": "sigsegv"
+    },
+    {
+      "regex": "OOMKilled",
+      "label": "oom"
+    },
+    {
+      "regex": "(?i)Out of memory",
+      "label": "oom"
+    },
+    {
+      "regex": "memory cgroup out of memory",
+      "label": "oom"
+    },
+    {
+      "regex": "CrashLoopBackOff",
+      "label": "crashloop"
+    },
+    {
+      "regex": "Back-off restarting",
+      "label": "crashloop"
+    },
+    {
+      "regex": "ErrImagePull",
+      "label": "image_pull"
+    },
+    {
+      "regex": "ImagePullBackOff",
+      "label": "image_pull"
+    },
+    {
+      "regex": "Evicted",
+      "label": "eviction"
+    },
+    {
+      "regex": "NotReady",
+      "label": "node_not_ready"
+    },
+    {
+      "regex": "(?i)node condition.*pressure",
+      "label": "node_pressure"
+    },
+    {
+      "regex": "(?i)Degraded.*True",
+      "label": "degraded"
+    },
+    {
+      "regex": "(?i)Available.*False",
+      "label": "unavailable"
+    },
+    {
+      "regex": "\"(GET|LIST|WATCH|PUT|POST|DELETE)\" .* (4\\d\\d|5\\d\\d)",
+      "label": "api_error"
+    },
+    {
+      "regex": "(?i)type.*Warning",
+      "label": "warning_event"
+    }
+  ],
+  "config": {
+    "error_context": 3,
+    "max_line_len": 500,
+    "file_streaming_threshold_mb": 50,
+    "blob_markers": ["'metadata':", "\"metadata\":", "'spec':", "\"spec\":", "fieldsV1", "managedFields"],
+    "block_detectors": [
+      {
+        "name": "health_checks",
+        "regex": "(?i)(health[yz]|readyz|livez)",
+        "min_count": 3,
+        "summary_template": "[HEALTH CHECKS: {count} lines, all OK]"
+      },
+      {
+        "name": "leader_election",
+        "regex": "(renewed|acquired) lease",
+        "min_count": 3,
+        "summary_template": "[LEADER ELECTION: {count} renewals]"
+      }
+    ],
+    "domain_keywords": ["healthz", "readyz", "livez", "leader election", "renewed lease", "CrashLoopBackOff", "informer"]
+  }
+}
