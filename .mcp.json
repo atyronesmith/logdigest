@@ -2,7 +2,7 @@
   "mcpServers": {
     "denoise": {
       "command": "uv",
-      "args": ["--directory", "~/Dev/logdigest", "run", "python", "-m", "denoise"],
+      "args": ["run", "python", "-m", "denoise"],
       "env": {}
     }
   }

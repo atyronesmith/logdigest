@@ -7,7 +7,14 @@ name = "denoise"
 version = "0.1.0"
 description = "Task-aware pre-digestion for RAG and LLM pipelines"
 requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Aaron Smith"},
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/atyronesmith/denoise"
 
 [project.optional-dependencies]
 rag = ["numpy"]

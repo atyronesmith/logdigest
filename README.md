@@ -106,7 +106,7 @@ Three tools are exposed: `predigest` (clean logs), `detect_domain` (identify log
 - [Pre-digestion theory and results](docs/PREDIGESTION.md) — why it works (entropy bounds), validated results (83% token savings)
 - [Guard module](docs/GUARD.md) — tiered classification, empirical findings, training weights
 - [Continuous calibration](docs/CONTINUOUS_CALIBRATION.md) — runtime drift detection and recalibration
-- Training and experimentation: see the [drift](https://github.com/atyronesmith/drift) sibling repo
+- Training and experimentation: see the drift sibling repo
 
 ## Development
 
