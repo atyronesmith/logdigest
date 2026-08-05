@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "denoise": {
+      "command": "uv",
+      "args": ["--directory", "/Users/aasmith/Dev/denoise", "run", "python", "-m", "denoise"],
+      "env": {}
+    }
+  }
+}

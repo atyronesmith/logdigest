@@ -76,6 +76,31 @@ verdict, confidence = classify(llm_output)
 # ("escalate", 0.72) → call LLM guard
 ```
 
+## MCP Server (Claude Code Integration)
+
+Denoise can run as an MCP server, giving Claude Code automatic access to pre-digestion tools. Claude will auto-detect the log type and clean it before analysis.
+
+```bash
+# Install with MCP support
+uv pip install -e ".[mcp]"
+```
+
+Add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "denoise": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/denoise", "run", "python", "-m", "denoise"],
+      "env": {}
+    }
+  }
+}
+```
+
+Three tools are exposed: `predigest` (clean logs), `detect_domain` (identify log type), and `entropy_check` (predict impact on a corpus).
+
 ## Documentation
 
 - [Pre-digestion theory and results](docs/PREDIGESTION.md) — why it works (entropy bounds), validated results (83% token savings)
