@@ -19,7 +19,7 @@ python -m pytest -v
 uv run python benchmarks/run_all.py
 ```
 
-No linter or formatter is currently configured.
+Linter: `ruff check src/ tests/` (config in `pyproject.toml`).
 
 ## Architecture
 
@@ -27,7 +27,7 @@ No linter or formatter is currently configured.
 
 - `src/logdigest/core.py` — General-purpose pipeline: boilerplate detection, MD5 deduplication, per-document cleaning. Stateless functional style.
 
-- `src/logdigest/domain_base.py` — Shared machinery for domain modules: `classify_line()`, `analyze_lines()`, `find_large_blobs()`, `predigest_stream()`. Domain modules define pattern lists; shared code does the rest.
+- `src/logdigest/domain_base.py` — Shared machinery for domain modules: `DomainModule` Protocol, `classify_line()`, `analyze_lines()`, `find_large_blobs()`, `predigest_stream()`, `PatternSet` loader. Domain modules implement the `DomainModule` Protocol; patterns are loaded from JSON files in `src/logdigest/patterns/`.
 
 - `src/logdigest/ansible.py` — Ansible log compression. Three levels: (1) line-level classification via regex, (2) block-level dedup (retry loops, item loops), (3) blob-level truncation (K8s API responses). Entry point: `predigest()`.
 
@@ -67,5 +67,5 @@ Guard/classifier/monitor code was moved to the drift sibling repo (`drift/src/dr
 logdigest is the **runtime pre-digestion library**. The drift sibling repo handles training, probing, experimentation, and safety classification.
 
 - Drift experiments validate logdigest's pre-digestion effectiveness
-- Drift will provide `drift discover` for automated pattern generation (planned)
+- `logdigest discover` generates pattern sets from log corpora (requires `[discover]` extra)
 - Guard classification and drift monitoring live in `drift/src/drift/safety/`, not here

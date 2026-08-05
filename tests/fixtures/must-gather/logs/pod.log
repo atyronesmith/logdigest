@@ -1,0 +1,10 @@
+"GET /healthz" 200 1ms
+"GET /healthz" 200 2ms
+"GET /healthz" 200 1ms
+"GET /readyz" 200 1ms
+caches populated
+normal operator log line
+another operator log line
+more operator output
+level=error msg="container OOMKilled"
+restarting container

@@ -1,14 +1,13 @@
-"""Tests for denoise CI/CD log pre-digestion."""
+"""Tests for logdigest CI/CD log pre-digestion."""
 
 from logdigest.cicd import (
     classify_line,
     detect_ci_system,
+    find_container_pull_blocks,
+    find_install_blocks,
     predigest,
     predigest_file_streaming,
-    find_install_blocks,
-    find_container_pull_blocks,
 )
-
 
 # ---------------------------------------------------------------------------
 # Level 1: Line classification

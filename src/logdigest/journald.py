@@ -16,9 +16,13 @@ from pathlib import Path
 
 from logdigest.domain_base import (
     PatternSet,
-    classify_line as _classify_line,
-    analyze_file as _analyze_file,
     predigest_stream,
+)
+from logdigest.domain_base import (
+    analyze_file as _analyze_file,
+)
+from logdigest.domain_base import (
+    classify_line as _classify_line,
 )
 
 # ---------------------------------------------------------------------------
@@ -26,9 +30,6 @@ from logdigest.domain_base import (
 # ---------------------------------------------------------------------------
 
 _ps = PatternSet.load("journald")
-if _ps is None:
-    raise RuntimeError("Missing pattern file: patterns/journald.json")
-
 NOISE_PATTERNS = _ps.noise_patterns
 SIGNAL_PATTERNS = _ps.signal_patterns
 
@@ -175,7 +176,6 @@ def predigest(text: str, keep_timestamps: bool = False) -> str:
 
         # Level 3: Truncate large stack traces (keep first and last 5 lines)
         if "Call Trace:" in stripped:
-            trace_start = i
             trace_lines = [line]
             i += 1
             while i < len(lines) and (

@@ -16,10 +16,13 @@ from pathlib import Path
 
 from logdigest.domain_base import (
     PatternSet,
-    classify_line as _classify_line,
-    analyze_file as _analyze_file,
-    find_large_blobs,
     predigest_stream,
+)
+from logdigest.domain_base import (
+    analyze_file as _analyze_file,
+)
+from logdigest.domain_base import (
+    classify_line as _classify_line,
 )
 
 # ---------------------------------------------------------------------------
@@ -27,9 +30,6 @@ from logdigest.domain_base import (
 # ---------------------------------------------------------------------------
 
 _ps = PatternSet.load("cicd")
-if _ps is None:
-    raise RuntimeError("Missing pattern file: patterns/cicd.json")
-
 NOISE_PATTERNS = _ps.noise_patterns
 SIGNAL_PATTERNS = _ps.signal_patterns
 
@@ -244,8 +244,7 @@ def predigest(text: str, ci_system: str | None = None) -> str:
             continue
 
         # Level 3: Truncate large dependency trees / build stats
-        if len(line) > 500:
-            if "node_modules" in line or "site-packages" in line:
+        if len(line) > 500 and ("node_modules" in line or "site-packages" in line):
                 output.append("[DEPENDENCY TREE: large output omitted]")
                 i += 1
                 continue

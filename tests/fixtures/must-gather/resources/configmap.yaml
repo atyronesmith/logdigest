@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-config
+  namespace: openshift-config
+  managedFields:
+  - manager: kubectl
+    operation: Apply
+    fieldsType: FieldsV1
+    fieldsV1:
+      f:data:
+data:
+  key: value

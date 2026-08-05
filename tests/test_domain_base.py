@@ -1,9 +1,8 @@
-"""Tests for denoise domain_base shared machinery."""
+"""Tests for logdigest domain_base shared machinery."""
 
 import re
 
-from logdigest.domain_base import classify_line, analyze_lines, find_large_blobs
-
+from logdigest.domain_base import DomainModule, analyze_lines, classify_line, find_large_blobs
 
 NOISE = [
     (re.compile(r"^DEBUG:"), "debug"),
@@ -30,10 +29,10 @@ def test_classify_unknown():
     assert classify_line("INFO: normal stuff", NOISE, SIGNAL) == "unknown"
 
 
-def test_classify_noise_takes_priority():
-    """If a line matches both noise and signal, noise wins (checked first)."""
-    both_noise = NOISE + [(re.compile(r"^ERROR:"), "also_noise")]
-    assert classify_line("ERROR: something", both_noise, SIGNAL) == "noise:also_noise"
+def test_classify_signal_takes_priority():
+    """If a line matches both noise and signal, signal wins."""
+    both_noise = [*NOISE, (re.compile(r"^ERROR:"), "also_noise")]
+    assert classify_line("ERROR: something", both_noise, SIGNAL) == "signal:error"
 
 
 def test_classify_strips_whitespace():
@@ -99,3 +98,26 @@ def test_find_large_blobs_first_marker_wins():
     line = "z" * 600 + " 'metadata': foo 'spec': bar"
     blobs = find_large_blobs([line], min_chars=500, markers=["'metadata':", "'spec':"])
     assert blobs[0]["type"] == "'metadata':"
+
+
+class TestDomainModuleProtocol:
+    """All domain modules must satisfy the DomainModule protocol."""
+
+    def _check(self, mod):
+        assert isinstance(mod, DomainModule)
+
+    def test_ansible(self):
+        import logdigest.ansible
+        self._check(logdigest.ansible)
+
+    def test_mustgather(self):
+        import logdigest.mustgather
+        self._check(logdigest.mustgather)
+
+    def test_cicd(self):
+        import logdigest.cicd
+        self._check(logdigest.cicd)
+
+    def test_journald(self):
+        import logdigest.journald
+        self._check(logdigest.journald)

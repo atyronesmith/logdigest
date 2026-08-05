@@ -126,10 +126,10 @@ Impact is inversely proportional to document entropy. If `predicted_impact` is "
 
 ## Relationship to Drift
 
-Denoise is the **runtime library** for pre-digestion. The drift sibling project is where the research, experimentation, and validation happen.
+**logdigest** is the **runtime library** for pre-digestion. The drift sibling project is where the research, experimentation, and validation happen.
 
 - Drift measures *whether* pre-digestion helps for a given corpus (entropy analysis, quality comparisons)
-- Denoise *implements* the pre-digestion that drift validates
+- logdigest *implements* the pre-digestion that drift validates
 - Drift's `drift probe` and `drift distill` commands train classifiers that logdigest runs at inference time
 
 For full experiment details, see the drift repo's `docs/PAPER.md` and `docs/RESULTS.md`.
