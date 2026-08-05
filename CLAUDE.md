@@ -45,7 +45,7 @@ The project is a library (no CLI entry points). Built with hatchling, dependenci
 
 ## Relationship to Drift
 
-Denoise is the **runtime library**. The [drift](https://github.com/atyronesmith/drift) sibling repo is where training, probing, and experimentation happen.
+Denoise is the **runtime library**. The drift sibling repo is where training, probing, and experimentation happen.
 
 - Drift trains classifiers (`drift distill`, `scripts/train_guard_classifier.py`) → exports weights
 - Denoise loads weights and runs classifiers at inference time

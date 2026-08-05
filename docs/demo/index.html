@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>denoise - Pre-digestion for LLM Pipelines</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* --- Header --- */
+  .header {
+    text-align: center;
+    padding: 40px 20px 20px;
+  }
+  .header h1 {
+    font-size: 2.4rem;
+    color: #58a6ff;
+    letter-spacing: -0.5px;
+  }
+  .header h1 span { color: #7ee787; }
+  .header p {
+    color: #8b949e;
+    font-size: 1.1rem;
+    margin-top: 8px;
+  }
+
+  /* --- Main diagram --- */
+  .diagram {
+    max-width: 1200px;
+    margin: 30px auto;
+    padding: 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* --- K8s platform section --- */
+  .platform {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 30px;
+    background: linear-gradient(135deg, #161b22 0%, #1c2333 100%);
+    border: 1px solid #30363d;
+    border-radius: 12px 12px 0 0;
+  }
+  .k8s-logo {
+    width: 70px;
+    height: 70px;
+    flex-shrink: 0;
+  }
+  .platform-info h2 {
+    font-size: 1.3rem;
+    color: #58a6ff;
+  }
+  .platform-info p {
+    color: #8b949e;
+    font-size: 0.9rem;
+    margin-top: 4px;
+  }
+
+  /* --- Log sources row --- */
+  .log-sources {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border-left: 1px solid #30363d;
+    border-right: 1px solid #30363d;
+  }
+
+  .log-source {
+    text-align: center;
+    padding: 16px 8px;
+    border-right: 1px solid #21262d;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .log-source:last-child { border-right: none; }
+  .log-source:hover { background: #161b22; }
+  .log-source.active { background: #161b22; }
+
+  .log-source .icon { font-size: 1.6rem; margin-bottom: 6px; }
+  .log-source .name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #c9d1d9;
+  }
+  .log-source .cmd {
+    font-size: 0.7rem;
+    color: #8b949e;
+    font-family: 'SF Mono', Monaco, monospace;
+    margin-top: 2px;
+  }
+
+  /* --- Arrow connector --- */
+  .connector {
+    display: flex;
+    justify-content: center;
+    border-left: 1px solid #30363d;
+    border-right: 1px solid #30363d;
+    padding: 8px 0;
+  }
+  .arrow-down {
+    width: 2px;
+    height: 30px;
+    background: #30363d;
+    position: relative;
+  }
+  .arrow-down::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: -5px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #30363d;
+  }
+
+  /* --- Animation area --- */
+  .animation-area {
+    border: 1px solid #30363d;
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+  }
+
+  /* --- Before/After panels --- */
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    min-height: 380px;
+  }
+
+  .panel {
+    padding: 16px;
+    position: relative;
+  }
+  .panel-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-label .badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .input-panel { background: #1a0e0e; }
+  .input-panel .panel-label { color: #f85149; }
+  .input-panel .badge { background: #3d1214; color: #f85149; }
+
+  .output-panel { background: #0e1a0e; }
+  .output-panel .panel-label { color: #7ee787; }
+  .output-panel .badge { background: #12301a; color: #7ee787; }
+
+  .denoise-col {
+    width: 140px;
+    background: #161b22;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-left: 1px solid #30363d;
+    border-right: 1px solid #30363d;
+    padding: 16px 10px;
+    gap: 12px;
+  }
+  .denoise-col .engine-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #d2a8ff;
+  }
+  .denoise-col .engine-icon {
+    font-size: 2rem;
+  }
+
+  .tier-list {
+    list-style: none;
+    font-size: 0.7rem;
+    color: #8b949e;
+    text-align: center;
+  }
+  .tier-list li {
+    padding: 3px 0;
+    border-bottom: 1px solid #21262d;
+  }
+  .tier-list li:last-child { border-bottom: none; }
+  .tier-list .tier-active {
+    color: #d2a8ff;
+    font-weight: 600;
+  }
+
+  /* --- Log lines --- */
+  .log-lines {
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .log-line {
+    padding: 1px 4px;
+    border-radius: 2px;
+    transition: all 0.5s ease;
+  }
+  .log-line.noise {
+    color: #484f58;
+    background: rgba(248, 81, 73, 0.05);
+  }
+  .log-line.noise.fading {
+    opacity: 0;
+    height: 0;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    transition: all 0.6s ease;
+  }
+  .log-line.signal {
+    color: #f0f3f6;
+    background: rgba(126, 231, 135, 0.08);
+  }
+  .log-line.collapse-summary {
+    color: #d2a8ff;
+    background: rgba(210, 168, 255, 0.08);
+    font-weight: 500;
+    font-style: italic;
+  }
+
+  /* --- Stats bar --- */
+  .stats-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    background: #161b22;
+    border-top: 1px solid #30363d;
+  }
+  .stat {
+    text-align: center;
+    padding: 16px 10px;
+    border-right: 1px solid #21262d;
+  }
+  .stat:last-child { border-right: none; }
+  .stat-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+  .stat-label {
+    font-size: 0.7rem;
+    color: #8b949e;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .stat-value.green { color: #7ee787; }
+  .stat-value.red { color: #f85149; }
+  .stat-value.purple { color: #d2a8ff; }
+  .stat-value.blue { color: #58a6ff; }
+
+  /* --- LLM savings section --- */
+  .llm-section {
+    max-width: 1200px;
+    margin: 30px auto;
+    padding: 0 20px;
+  }
+  .llm-card {
+    background: linear-gradient(135deg, #161b22 0%, #1c2333 100%);
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 30px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+  }
+  .llm-flow {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .llm-flow h3 {
+    font-size: 1.1rem;
+    color: #58a6ff;
+    margin-bottom: 4px;
+  }
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+  }
+  .flow-row .pct {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-weight: 700;
+    min-width: 45px;
+  }
+  .flow-bar {
+    height: 8px;
+    border-radius: 4px;
+    transition: width 1s ease;
+  }
+  .flow-row.tier1 { background: rgba(126, 231, 135, 0.08); }
+  .flow-row.tier1 .pct { color: #7ee787; }
+  .flow-row.tier1 .flow-bar { background: #7ee787; }
+
+  .flow-row.tier2 { background: rgba(210, 168, 255, 0.08); }
+  .flow-row.tier2 .pct { color: #d2a8ff; }
+  .flow-row.tier2 .flow-bar { background: #d2a8ff; }
+
+  .flow-row.tier3 { background: rgba(88, 166, 255, 0.08); }
+  .flow-row.tier3 .pct { color: #58a6ff; }
+  .flow-row.tier3 .flow-bar { background: #58a6ff; }
+
+  .flow-row.llm { background: rgba(248, 81, 73, 0.08); }
+  .flow-row.llm .pct { color: #f85149; }
+  .flow-row.llm .flow-bar { background: #f85149; }
+
+  .cost-comparison {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+  }
+  .cost-comparison h3 {
+    font-size: 1.1rem;
+    color: #58a6ff;
+    margin-bottom: 4px;
+  }
+  .cost-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+  .cost-row.without {
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.2);
+  }
+  .cost-row.with {
+    background: rgba(126, 231, 135, 0.08);
+    border: 1px solid rgba(126, 231, 135, 0.2);
+  }
+  .cost-amount {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-weight: 700;
+    font-size: 1.3rem;
+  }
+  .cost-row.without .cost-amount { color: #f85149; }
+  .cost-row.with .cost-amount { color: #7ee787; }
+
+  .savings-callout {
+    text-align: center;
+    padding: 14px;
+    background: rgba(126, 231, 135, 0.06);
+    border: 1px dashed rgba(126, 231, 135, 0.3);
+    border-radius: 8px;
+    font-size: 1.1rem;
+    color: #7ee787;
+    font-weight: 600;
+  }
+  .savings-callout span {
+    font-size: 1.5rem;
+    font-family: 'SF Mono', Monaco, monospace;
+  }
+
+  /* --- Play button --- */
+  .controls {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+    border-top: 1px solid #30363d;
+    background: #161b22;
+  }
+  .btn {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: inherit;
+  }
+  .btn:hover { background: #30363d; border-color: #8b949e; }
+  .btn.primary {
+    background: #238636;
+    border-color: #2ea043;
+    color: #fff;
+  }
+  .btn.primary:hover { background: #2ea043; }
+
+  /* --- Footer --- */
+  .footer {
+    text-align: center;
+    padding: 40px 20px;
+    color: #484f58;
+    font-size: 0.8rem;
+  }
+  .footer a { color: #58a6ff; text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+
+  /* --- Responsive --- */
+  @media (max-width: 768px) {
+    .log-sources { grid-template-columns: repeat(2, 1fr); }
+    .panels { grid-template-columns: 1fr; }
+    .denoise-col {
+      width: 100%;
+      flex-direction: row;
+      border-left: none;
+      border-right: none;
+      border-top: 1px solid #30363d;
+      border-bottom: 1px solid #30363d;
+    }
+    .llm-card { grid-template-columns: 1fr; }
+    .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>de<span>noise</span></h1>
+  <p>Task-aware pre-digestion for LLM pipelines</p>
+</div>
+
+<div class="diagram">
+  <!-- Platform -->
+  <div class="platform">
+    <svg class="k8s-logo" viewBox="0 0 722 702" xmlns="http://www.w3.org/2000/svg">
+      <g fill="#326CE5">
+        <path d="M358.986 10.011c-11.578 0-22.59 2.292-31.842 7.143L88.67 145.94c-20.129 10.557-35.108 33.39-40.241 55.783L3.286 476.64c-4.766 20.814-.892 44.59 13.016 61.317l152.9 189.08c12.424 14.883 34.792 25.963 55.597 25.963h271.375c20.809 0 43.155-11.077 55.595-25.963l152.905-189.076c13.904-16.724 17.781-40.5 13.016-61.318L672.543 201.72c-5.135-22.395-20.104-45.218-40.236-55.775L393.83 17.15c-9.853-5.17-22.324-7.139-34.844-7.139z"/>
+      </g>
+      <g fill="#fff">
+        <path d="M361.26 118.088c-7.895.214-14.478 6.012-15.703 13.793l-4.39 27.833c-12.46 1.806-24.612 4.87-36.265 9.205l-18.278-21.56c-5.363-6.35-14.273-8.563-21.96-5.457-7.686 3.11-12.337 10.833-11.464 19.03l3.168 29.725c-10.63 7.03-20.547 15.137-29.544 24.221l-24.372-13.33c-7.208-3.95-16.177-2.54-21.87 3.428-5.69 5.973-6.687 14.982-2.43 21.969l16.065 26.33c-7.025 10.176-13.05 21.13-17.82 32.726l-28.198 1.68c-8.192.488-14.86 6.605-16.263 14.916-1.403 8.31 2.87 16.436 10.422 19.81l24.913 11.128c-1.268 12.364-1.262 24.895.013 37.389l-24.878 11.112c-7.552 3.375-11.826 11.5-10.422 19.81 1.403 8.313 8.07 14.43 16.262 14.916l28.244 1.688c4.79 11.573 10.83 22.504 17.866 32.655l-16.112 26.403c-4.258 6.988-3.26 15.996 2.43 21.97 5.694 5.97 14.664 7.377 21.872 3.428l24.42-13.362c8.986 9.063 18.886 17.154 29.497 24.174l-3.12 29.287c-.87 8.196 3.778 15.92 11.463 19.03 7.688 3.107 16.597.893 21.96-5.457l18.23-21.512c11.67 4.348 23.838 7.42 36.313 9.228l4.34 27.5c1.346 8.534 8.796 14.786 17.38 14.575 8.58-.21 15.74-6.82 16.693-15.4l4.394-39.398c.293-.047.585-.105.877-.156 10.46-1.894 20.7-4.69 30.594-8.304l.55-.22 26.112 30.813c5.362 6.35 14.27 8.563 21.96 5.457 7.685-3.11 12.334-10.833 11.463-19.03l-4.536-42.556c.23-.164.465-.32.694-.487 8.9-6.275 17.243-13.282 24.934-20.946l.41-.42 34.895 19.086c7.208 3.95 16.176 2.542 21.87-3.428 5.69-5.973 6.69-14.982 2.43-21.97l-23.047-37.77c.128-.2.262-.398.39-.6 5.96-9.27 11.17-19.007 15.536-29.12l.268-.637 40.32-2.404c8.192-.487 14.86-6.603 16.264-14.916 1.402-8.31-2.87-16.435-10.422-19.81l-35.644-15.908c.02-.39.045-.778.063-1.168.894-12.044.656-23.967-.612-35.653l35.6-15.892c7.552-3.374 11.824-11.5 10.422-19.81-1.404-8.31-8.072-14.428-16.264-14.915l-40.369-2.41c-.07-.168-.138-.337-.21-.505-4.38-10.162-9.607-19.944-15.595-29.25-.172-.27-.352-.532-.527-.8l23.094-37.844c4.257-6.988 3.26-15.997-2.43-21.97-5.694-5.97-14.663-7.378-21.87-3.428l-34.944 19.118c-.123-.12-.243-.24-.367-.36-7.69-7.69-16.036-14.72-24.943-21.013-.253-.18-.51-.35-.764-.527l4.583-43.01c.874-8.197-3.775-15.92-11.46-19.03-7.688-3.106-16.597-.892-21.96 5.458l-26.16 30.867-.5-.2c-9.895-3.63-20.13-6.438-30.587-8.35-.298-.055-.596-.098-.895-.15l-4.442-39.842c-.806-7.22-5.99-13.03-12.57-14.586-1.37-.324-2.78-.474-4.183-.435zm-4.437 137.86c5.2-.065 10.457.29 15.718 1.09 42.097 6.405 74.477 37.094 85.488 75.108.234.035.472.06.705.1l34.058 5.933c2.21.384 3.69 2.488 3.303 4.696l-2.453 14.09c-.387 2.21-2.488 3.69-4.696 3.305l-32.058-5.585c-6.22 17.358-17.234 33.092-32.334 44.908l.255.62 13.558 32.71c.868 2.094-.123 4.496-2.217 5.363l-13.193 5.47c-2.094.87-4.497-.122-5.365-2.215l-13.53-32.647c-.228.072-.452.153-.68.223-18.02 5.624-36.548 5.823-53.52 1.45-.23.408-.44.83-.68 1.233l-18.61 30.935c-1.187 1.97-3.737 2.606-5.707 1.42l-12.376-7.443c-1.972-1.187-2.607-3.74-1.42-5.71l18.616-30.937c.17-.283.365-.545.54-.824-14.69-12.42-25.147-29.33-29.648-49.067-.26-.094-.516-.198-.777-.288l-31.57-10.77c-2.08-.708-3.188-2.977-2.478-5.058l4.496-13.176c.71-2.08 2.98-3.19 5.06-2.48l31.695 10.81c.193.067.375.155.567.226 8.893-17.735 22.862-32.58 40.648-42.485.074-.35.135-.703.214-1.052l7.342-33.8c.48-2.196 2.637-3.596 4.835-3.118l14.01 3.043c2.198.477 3.596 2.637 3.12 4.834l-7.353 33.844c-.06.275-.148.54-.215.812 1.99.79 3.974 1.627 5.914 2.573 9.56 4.66 18.01 10.89 25.12 18.243.35-.194.697-.396 1.05-.585l29.99-17.05c1.95-1.11 4.44-.424 5.546 1.526l7.04 12.386c1.107 1.95.423 4.44-1.526 5.545l-29.893 16.994c-.326.186-.666.34-1 .513 5.06 10.56 8.302 22.215 9.206 34.568l1.058.118 34.058 5.934c2.21.385 3.69 2.487 3.303 4.697l-2.453 14.09c-.387 2.208-2.488 3.688-4.696 3.303l-34.058-5.934-.978-.17c-3.47 11.462-9.1 22.268-16.982 31.634.206.34.422.674.62 1.02l18.614 30.938c1.187 1.97.552 4.522-1.42 5.71l-12.376 7.44c-1.97 1.187-4.52.55-5.707-1.42l-18.613-30.934c-.233-.39-.434-.793-.656-1.19-12.22 7.28-26.072 12.028-40.946 13.527-.075.354-.133.712-.217 1.064l-7.342 33.8c-.478 2.197-2.637 3.596-4.835 3.118l-14.008-3.043c-2.198-.478-3.597-2.637-3.12-4.835l7.354-33.844c.058-.274.146-.537.21-.808-14.69-3.35-28.15-9.78-39.62-18.567-.387.282-.764.576-1.157.85l-26.358 18.13c-1.88 1.293-4.457.81-5.75-1.07l-8.3-12.068c-1.293-1.88-.813-4.455 1.067-5.748l26.33-18.113c.373-.257.766-.48 1.146-.726-7.51-12.342-12.55-26.354-14.353-41.416l-1.15-.153-34.06-5.934c-2.208-.387-3.688-2.49-3.302-4.697l2.453-14.09c.387-2.21 2.487-3.69 4.695-3.305l34.06 5.935c.313.054.613.136.92.2 2.91-14.604 8.707-28.24 16.912-40.163-.246-.31-.5-.612-.74-.93l-21.14-27.38c-1.385-1.794-1.053-4.375.74-5.76l11.307-8.73c1.795-1.385 4.374-1.054 5.76.74l21.098 27.324c.322.418.607.856.917 1.282 13.232-9.183 28.52-15.324 44.983-17.617.09-.346.163-.697.26-1.04l9.282-33.234c.61-2.175 2.878-3.446 5.053-2.836l13.727 3.836c2.175.608 3.445 2.877 2.836 5.053l-9.28 33.23c-.1.355-.226.697-.335 1.048 5.43.425 10.82 1.277 16.107 2.622 10.07 2.562 19.392 6.69 27.822 12.092.313-.288.617-.585.938-.866l25.12-21.6c1.722-1.48 4.316-1.285 5.797.437l9.386 10.916c1.48 1.724 1.287 4.318-.435 5.798l-25.092 21.576c-.36.31-.744.583-1.113.88z"/>
+      </g>
+    </svg>
+    <div class="platform-info">
+      <h2>Kubernetes / OpenShift Platform</h2>
+      <p>Generates massive volumes of operational logs across every component</p>
+    </div>
+  </div>
+
+  <!-- Log sources -->
+  <div class="log-sources">
+    <div class="log-source active" data-domain="mustgather" onclick="switchDomain(this)">
+      <div class="icon">&#x1F4E6;</div>
+      <div class="name">Pod Logs</div>
+      <div class="cmd">oc logs pod</div>
+    </div>
+    <div class="log-source" data-domain="ansible" onclick="switchDomain(this)">
+      <div class="icon">&#x2699;</div>
+      <div class="name">Ansible Logs</div>
+      <div class="cmd">ansible-playbook</div>
+    </div>
+    <div class="log-source" data-domain="cicd" onclick="switchDomain(this)">
+      <div class="icon">&#x1F504;</div>
+      <div class="name">CI/CD Logs</div>
+      <div class="cmd">GitHub Actions</div>
+    </div>
+    <div class="log-source" data-domain="journald" onclick="switchDomain(this)">
+      <div class="icon">&#x1F4DC;</div>
+      <div class="name">System Journal</div>
+      <div class="cmd">journalctl</div>
+    </div>
+  </div>
+
+  <!-- Arrow -->
+  <div class="connector">
+    <div class="arrow-down"></div>
+  </div>
+
+  <!-- Animation panels -->
+  <div class="animation-area">
+    <div class="panels">
+      <div class="panel input-panel">
+        <div class="panel-label">
+          Raw Input
+          <span class="badge" id="input-size">2,847 lines</span>
+        </div>
+        <div class="log-lines" id="input-log"></div>
+      </div>
+
+      <div class="denoise-col">
+        <div class="engine-label">denoise</div>
+        <div class="engine-icon">&#x1F9F9;</div>
+        <ul class="tier-list">
+          <li class="tier-active" id="tier-line">Line filter</li>
+          <li id="tier-block">Block collapse</li>
+          <li id="tier-blob">Blob truncate</li>
+        </ul>
+        <div style="font-size:0.65rem; color:#8b949e; text-align:center; margin-top:4px;">
+          &lt; 1ms
+        </div>
+      </div>
+
+      <div class="panel output-panel">
+        <div class="panel-label">
+          Clean Output
+          <span class="badge" id="output-size">487 lines</span>
+        </div>
+        <div class="log-lines" id="output-log"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn primary" id="play-btn" onclick="runAnimation()">Run Demo</button>
+      <button class="btn" onclick="resetAnimation()">Reset</button>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats-bar" style="margin-top: 20px; border-radius: 12px; border: 1px solid #30363d;">
+    <div class="stat">
+      <div class="stat-value red" id="stat-noise">83%</div>
+      <div class="stat-label">Noise Removed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value green" id="stat-tokens">83%</div>
+      <div class="stat-label">Token Savings</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value purple" id="stat-blocks">12</div>
+      <div class="stat-label">Blocks Collapsed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value blue" id="stat-signal">100%</div>
+      <div class="stat-label">Errors Preserved</div>
+    </div>
+  </div>
+</div>
+
+<!-- LLM savings section -->
+<div class="llm-section">
+  <div class="llm-card">
+    <div class="llm-flow">
+      <h3>What reaches the LLM?</h3>
+      <div class="flow-row tier1">
+        <span class="pct">65%</span>
+        <span>Handled by regex rules</span>
+        <div class="flow-bar" style="width: 65%; flex-shrink:0;"></div>
+      </div>
+      <div class="flow-row tier2">
+        <span class="pct">16%</span>
+        <span>Handled by classifier</span>
+        <div class="flow-bar" style="width: 16%; flex-shrink:0;"></div>
+      </div>
+      <div class="flow-row tier3">
+        <span class="pct">12%</span>
+        <span>Block/blob compression</span>
+        <div class="flow-bar" style="width: 12%; flex-shrink:0;"></div>
+      </div>
+      <div class="flow-row llm">
+        <span class="pct">7%</span>
+        <span>Needs LLM reasoning</span>
+        <div class="flow-bar" style="width: 7%; flex-shrink:0;"></div>
+      </div>
+    </div>
+
+    <div class="cost-comparison">
+      <h3>Cost per 1,000 log analyses</h3>
+      <div class="cost-row without">
+        <span>Without denoise</span>
+        <span class="cost-amount">$47.20</span>
+      </div>
+      <div class="cost-row with">
+        <span>With denoise</span>
+        <span class="cost-amount">$8.02</span>
+      </div>
+      <div class="savings-callout">
+        Save <span>83%</span> on LLM costs
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  <p>
+    Pure Python &nbsp;&middot;&nbsp; Zero runtime dependencies &nbsp;&middot;&nbsp; Apache 2.0
+  </p>
+</div>
+
+<script>
+const DOMAINS = {
+  mustgather: {
+    name: "mustgather",
+    stats: { noise: "82%", tokens: "78%", blocks: "8", signal: "100%" },
+    inputSize: "1,847 lines",
+    outputSize: "332 lines",
+    input: [
+      { text: '"GET /healthz" 200 OK 1ms', type: 'noise' },
+      { text: '"GET /healthz" 200 OK 2ms', type: 'noise' },
+      { text: '"GET /healthz" 200 OK 1ms', type: 'noise' },
+      { text: '"GET /healthz" 200 OK 3ms', type: 'noise' },
+      { text: '"GET /healthz" 200 OK 1ms', type: 'noise' },
+      { text: '"GET /readyz" 200 OK 2ms', type: 'noise' },
+      { text: '"GET /readyz" 200 OK 1ms', type: 'noise' },
+      { text: 'successfully renewed lease kube-system/kube-sched', type: 'noise' },
+      { text: 'successfully renewed lease kube-system/kube-sched', type: 'noise' },
+      { text: 'successfully renewed lease kube-system/kube-sched', type: 'noise' },
+      { text: 'caches populated', type: 'noise' },
+      { text: 'Starting shared informer factory', type: 'noise' },
+      { text: 'Listing and watching v1.Pods', type: 'noise' },
+      { text: '  resourceVersion: "48291"', type: 'noise' },
+      { text: '  uid: a3f8-b29c-4e71', type: 'noise' },
+      { text: '  managedFields:', type: 'noise' },
+      { text: '  - manager: kubectl', type: 'noise' },
+      { text: '    fieldsV1: {f:metadata: ...}', type: 'noise' },
+      { text: 'level=error msg="pod api-server-7b OOMKilled"', type: 'signal' },
+      { text: 'level=error msg="container exceeded memory limit"', type: 'signal' },
+      { text: 'CrashLoopBackOff: back-off 5m0s restarting', type: 'signal' },
+      { text: 'Event: Warning  Unhealthy  Readiness probe failed', type: 'signal' },
+      { text: '"GET /healthz" 200 OK 1ms', type: 'noise' },
+      { text: '"GET /healthz" 200 OK 2ms', type: 'noise' },
+      { text: 'Throttling request took 1.2s', type: 'noise' },
+    ],
+    output: [
+      { text: '[HEALTH CHECKS: 847 lines, all OK]', type: 'collapse-summary' },
+      { text: '[LEADER ELECTION: 312 renewals]', type: 'collapse-summary' },
+      { text: '[MANAGED FIELDS: 14 blocks omitted]', type: 'collapse-summary' },
+      { text: '', type: 'signal' },
+      { text: 'level=error msg="pod api-server-7b OOMKilled"', type: 'signal' },
+      { text: 'level=error msg="container exceeded memory limit"', type: 'signal' },
+      { text: 'CrashLoopBackOff: back-off 5m0s restarting', type: 'signal' },
+      { text: 'Event: Warning  Unhealthy  Readiness probe failed', type: 'signal' },
+    ],
+  },
+
+  ansible: {
+    name: "ansible",
+    stats: { noise: "83%", tokens: "83%", blocks: "12", signal: "100%" },
+    inputSize: "2,847 lines",
+    outputSize: "487 lines",
+    input: [
+      { text: 'ok: [worker-0] => (item=pkg_base)', type: 'noise' },
+      { text: 'ok: [worker-0] => (item=pkg_utils)', type: 'noise' },
+      { text: 'ok: [worker-0] => (item=pkg_deps)', type: 'noise' },
+      { text: 'ok: [worker-0] => (item=pkg_extra)', type: 'noise' },
+      { text: 'ok: [worker-0] => (item=pkg_tools)', type: 'noise' },
+      { text: 'skipping: [worker-1]', type: 'noise' },
+      { text: 'skipping: [worker-2]', type: 'noise' },
+      { text: 'changed: [master-0]', type: 'noise' },
+      { text: 'FAILED - RETRYING: Install OCP (3 retries left).', type: 'noise' },
+      { text: 'FAILED - RETRYING: Install OCP (2 retries left).', type: 'noise' },
+      { text: 'FAILED - RETRYING: Install OCP (1 retries left).', type: 'noise' },
+      { text: 'Monday 14 April 2026  09:41:23 +0000', type: 'noise' },
+      { text: '[DEPRECATION WARNING]: old_module is deprecated', type: 'noise' },
+      { text: '', type: 'noise' },
+      { text: 'PLAY [Deploy cluster]', type: 'signal' },
+      { text: 'fatal: [master-0]: FAILED! => {"msg": "etcd health check failed", "rc": 1}', type: 'signal' },
+      { text: '    "msg": "etcd cluster unhealthy: leader changed 3 times in 10s"', type: 'signal' },
+      { text: '    "stderr": "Error: unhealthy cluster"', type: 'signal' },
+      { text: 'PLAY RECAP *****', type: 'signal' },
+      { text: 'master-0: ok=12  changed=3  failed=1', type: 'signal' },
+      { text: 'ok: [worker-0]', type: 'noise' },
+      { text: 'ok: [worker-1]', type: 'noise' },
+      { text: 'skipping: [worker-3]', type: 'noise' },
+      { text: '"changed": false,', type: 'noise' },
+      { text: '"msg": "All assertions passed"', type: 'noise' },
+    ],
+    output: [
+      { text: '[ok: 5 items processed]', type: 'collapse-summary' },
+      { text: '[RETRY: Install OCP on master-0, 3 retries, still failing]', type: 'collapse-summary' },
+      { text: '', type: 'signal' },
+      { text: 'PLAY [Deploy cluster]', type: 'signal' },
+      { text: 'fatal: [master-0]: FAILED! => {"msg": "etcd health check failed"}', type: 'signal' },
+      { text: '    "msg": "etcd cluster unhealthy: leader changed 3 times"', type: 'signal' },
+      { text: '    "stderr": "Error: unhealthy cluster"', type: 'signal' },
+      { text: 'PLAY RECAP *****', type: 'signal' },
+      { text: 'master-0: ok=12  changed=3  failed=1', type: 'signal' },
+    ],
+  },
+
+  cicd: {
+    name: "cicd",
+    stats: { noise: "76%", tokens: "72%", blocks: "6", signal: "100%" },
+    inputSize: "1,204 lines",
+    outputSize: "289 lines",
+    input: [
+      { text: '##[group] Run actions/checkout@v4', type: 'noise' },
+      { text: '##[debug] GITHUB_WORKSPACE=/home/runner/work', type: 'noise' },
+      { text: 'Syncing repository: myorg/myapp', type: 'noise' },
+      { text: '##[endgroup]', type: 'noise' },
+      { text: '  Collecting requests>=2.28', type: 'noise' },
+      { text: '  Downloading requests-2.31.0-py3.whl (62 kB)', type: 'noise' },
+      { text: '  Collecting flask>=2.0', type: 'noise' },
+      { text: '  Downloading Flask-3.0.0-py3.whl (101 kB)', type: 'noise' },
+      { text: '  Installing collected packages: requests, flask', type: 'noise' },
+      { text: '  Successfully installed flask-3.0.0 requests-2.31.0', type: 'noise' },
+      { text: 'Pulling from library/python', type: 'noise' },
+      { text: 'a1b2c3d4e5f6: Downloading  42MB/128MB', type: 'noise' },
+      { text: 'a1b2c3d4e5f6: Pull complete', type: 'noise' },
+      { text: 'b2c3d4e5f6a7: Pull complete', type: 'noise' },
+      { text: 'Digest: sha256:abc123def456', type: 'noise' },
+      { text: 'Status: Downloaded newer image for python:3.11', type: 'noise' },
+      { text: 'Cache restored from key: pip-Linux-x86_64-abc123', type: 'noise' },
+      { text: 'Running test suite...', type: 'signal' },
+      { text: 'FAILED tests/test_api.py::test_create_user', type: 'signal' },
+      { text: 'AssertionError: expected 201, got 500', type: 'signal' },
+      { text: 'FAILED tests/test_api.py::test_delete_user', type: 'signal' },
+      { text: 'ERROR: 2 failed, 47 passed, 1 warning', type: 'signal' },
+      { text: '##[error] Process completed with exit code 1', type: 'signal' },
+      { text: '##[debug] finishing task', type: 'noise' },
+      { text: 'Post cache save: pip-Linux-x86_64', type: 'noise' },
+    ],
+    output: [
+      { text: '[DEPENDENCY INSTALL: 6 lines via pip]', type: 'collapse-summary' },
+      { text: '[CONTAINER PULL: library/python 6 lines]', type: 'collapse-summary' },
+      { text: '', type: 'signal' },
+      { text: 'Running test suite...', type: 'signal' },
+      { text: 'FAILED tests/test_api.py::test_create_user', type: 'signal' },
+      { text: 'AssertionError: expected 201, got 500', type: 'signal' },
+      { text: 'FAILED tests/test_api.py::test_delete_user', type: 'signal' },
+      { text: 'ERROR: 2 failed, 47 passed, 1 warning', type: 'signal' },
+      { text: '##[error] Process completed with exit code 1', type: 'signal' },
+    ],
+  },
+
+  journald: {
+    name: "journald",
+    stats: { noise: "71%", tokens: "68%", blocks: "9", signal: "100%" },
+    inputSize: "3,412 lines",
+    outputSize: "989 lines",
+    input: [
+      { text: 'Apr 13 09:00:01 node-0 CROND[4821]: (root) CMD (/usr/sbin/logrotate)', type: 'noise' },
+      { text: 'Apr 13 09:00:01 node-0 run-parts: starting /etc/cron.daily', type: 'noise' },
+      { text: 'Apr 13 09:00:02 node-0 run-parts: finished /etc/cron.daily', type: 'noise' },
+      { text: 'Apr 13 09:01:15 node-0 systemd[1]: Started Session 482 of user admin.', type: 'noise' },
+      { text: 'Apr 13 09:01:15 node-0 pam_unix(sshd:session): session opened for user admin', type: 'noise' },
+      { text: 'Apr 13 09:01:44 node-0 systemd[1]: Removed session 481.', type: 'noise' },
+      { text: 'Apr 13 09:02:00 node-0 systemd[1]: Starting My App Service...', type: 'noise' },
+      { text: 'Apr 13 09:02:01 node-0 systemd[1]: Started My App Service.', type: 'noise' },
+      { text: 'Apr 13 09:02:05 node-0 systemd[1]: Stopping My App Service...', type: 'noise' },
+      { text: 'Apr 13 09:02:05 node-0 systemd[1]: Stopped My App Service.', type: 'noise' },
+      { text: 'Apr 13 09:02:06 node-0 systemd[1]: Starting My App Service...', type: 'noise' },
+      { text: 'Apr 13 09:02:07 node-0 systemd[1]: Started My App Service.', type: 'noise' },
+      { text: 'Apr 13 09:02:10 node-0 audit[2841]: type=SYSCALL msg=audit(1681366930)', type: 'noise' },
+      { text: 'Apr 13 09:02:10 node-0 audit[2841]: type=CWD msg=audit(1681366930)', type: 'noise' },
+      { text: 'Apr 13 09:02:10 node-0 audit[2841]: type=PATH msg=audit(1681366930)', type: 'noise' },
+      { text: 'Apr 13 09:02:10 node-0 audit[2841]: type=PROCTITLE msg=audit(1681366930)', type: 'noise' },
+      { text: 'Apr 13 09:02:10 node-0 audit[2841]: type=EOE msg=audit(1681366930)', type: 'noise' },
+      { text: 'Apr 13 09:03:41 node-0 kernel: myapp[9821]: segfault at 0000000000', type: 'signal' },
+      { text: 'Apr 13 09:03:41 node-0 systemd[1]: myapp.service: Main process exited, code=exited, status=139', type: 'signal' },
+      { text: 'Apr 13 09:03:41 node-0 systemd-coredump: Process 9821 (myapp) dumped core', type: 'signal' },
+      { text: 'Apr 13 09:03:42 node-0 kernel: Out of memory: Killed process 9844 (myapp-worker)', type: 'signal' },
+      { text: 'Apr 13 09:04:00 node-0 kernel: usb 1-1: new high speed USB device', type: 'noise' },
+      { text: 'Apr 13 09:04:01 node-0 NetworkManager: DHCP lease renewed 192.168.1.100', type: 'noise' },
+      { text: 'Apr 13 09:04:15 node-0 kernel: registered new interface driver usbhid', type: 'noise' },
+      { text: 'Apr 13 09:05:00 node-0 CROND[4900]: (root) CMD (/usr/sbin/logrotate)', type: 'noise' },
+    ],
+    output: [
+      { text: '[SERVICE RESTART LOOP: My App Service, 6 events]', type: 'collapse-summary' },
+      { text: '[AUDIT BLOCK: 5 entries]', type: 'collapse-summary' },
+      { text: '', type: 'signal' },
+      { text: '09:03:41 node-0 kernel: myapp[9821]: segfault at 0000000000', type: 'signal' },
+      { text: '09:03:41 node-0 myapp.service: Main process exited, status=139', type: 'signal' },
+      { text: '09:03:41 node-0 systemd-coredump: Process 9821 (myapp) dumped core', type: 'signal' },
+      { text: '09:03:42 node-0 kernel: Out of memory: Killed process 9844', type: 'signal' },
+    ],
+  },
+};
+
+let currentDomain = 'mustgather';
+let animating = false;
+
+function switchDomain(el) {
+  if (animating) return;
+  document.querySelectorAll('.log-source').forEach(s => s.classList.remove('active'));
+  el.classList.add('active');
+  currentDomain = el.dataset.domain;
+  resetAnimation();
+}
+
+function renderInput(domain) {
+  const d = DOMAINS[domain];
+  const container = document.getElementById('input-log');
+  container.innerHTML = '';
+  d.input.forEach((line, i) => {
+    const div = document.createElement('div');
+    div.className = `log-line ${line.type}`;
+    div.textContent = line.text;
+    div.style.animationDelay = `${i * 30}ms`;
+    container.appendChild(div);
+  });
+  document.getElementById('input-size').textContent = d.inputSize;
+  document.getElementById('output-size').textContent = d.outputSize;
+}
+
+function renderOutput(domain) {
+  const container = document.getElementById('output-log');
+  container.innerHTML = '';
+}
+
+function updateStats(domain) {
+  const d = DOMAINS[domain];
+  document.getElementById('stat-noise').textContent = d.stats.noise;
+  document.getElementById('stat-tokens').textContent = d.stats.tokens;
+  document.getElementById('stat-blocks').textContent = d.stats.blocks;
+  document.getElementById('stat-signal').textContent = d.stats.signal;
+}
+
+function resetAnimation() {
+  animating = false;
+  document.getElementById('play-btn').disabled = false;
+  document.getElementById('play-btn').textContent = 'Run Demo';
+  renderInput(currentDomain);
+  renderOutput(currentDomain);
+  updateStats(currentDomain);
+
+  // Reset tier highlights
+  document.querySelectorAll('.tier-list li').forEach(li => li.classList.remove('tier-active'));
+  document.getElementById('tier-line').classList.add('tier-active');
+}
+
+async function runAnimation() {
+  if (animating) return;
+  animating = true;
+  const btn = document.getElementById('play-btn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+
+  const d = DOMAINS[currentDomain];
+  const inputLines = document.querySelectorAll('#input-log .log-line');
+
+  // Phase 1: Highlight noise lines
+  document.getElementById('tier-line').classList.add('tier-active');
+  for (let i = 0; i < inputLines.length; i++) {
+    if (inputLines[i].classList.contains('noise')) {
+      inputLines[i].style.background = 'rgba(248, 81, 73, 0.15)';
+      inputLines[i].style.borderLeft = '3px solid #f85149';
+    } else {
+      inputLines[i].style.background = 'rgba(126, 231, 135, 0.15)';
+      inputLines[i].style.borderLeft = '3px solid #7ee787';
+    }
+    await sleep(60);
+  }
+
+  await sleep(500);
+
+  // Phase 2: Fade out noise
+  document.getElementById('tier-block').classList.add('tier-active');
+  inputLines.forEach(line => {
+    if (line.classList.contains('noise')) {
+      line.classList.add('fading');
+    }
+  });
+
+  await sleep(800);
+
+  // Phase 3: Show output
+  document.getElementById('tier-blob').classList.add('tier-active');
+  const outputContainer = document.getElementById('output-log');
+  for (let i = 0; i < d.output.length; i++) {
+    const div = document.createElement('div');
+    div.className = `log-line ${d.output[i].type}`;
+    div.textContent = d.output[i].text;
+    div.style.opacity = '0';
+    div.style.transform = 'translateX(-10px)';
+    outputContainer.appendChild(div);
+    await sleep(80);
+    div.style.transition = 'all 0.3s ease';
+    div.style.opacity = '1';
+    div.style.transform = 'translateX(0)';
+  }
+
+  await sleep(300);
+  btn.textContent = 'Done';
+  animating = false;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Initialize
+resetAnimation();
+</script>
+
+</body>
+</html>
