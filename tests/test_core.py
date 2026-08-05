@@ -1,4 +1,4 @@
-"""Tests for denoise core pre-digestion functions."""
+"""Tests for logdigest core pre-digestion functions."""
 
 from logdigest.core import (
     build_boilerplate_set,
@@ -77,3 +77,10 @@ def test_predigest_corpus_with_dupes():
     digested, stats = predigest_corpus(docs, dedup=True)
     assert stats["duplicates_removed"] == 4
     assert len(digested) == 16
+
+
+def test_predigest_corpus_small_skips_boilerplate():
+    docs = [f"doc {i}\nShared footer line here.\nContent {i}" for i in range(5)]
+    _digested, stats = predigest_corpus(docs)
+    assert stats["boilerplate_skipped"] is True
+    assert stats["boilerplate_lines"] == 0

@@ -1,10 +1,14 @@
-"""Tests for denoise MCP server tools.
+"""Tests for logdigest MCP server tools.
 
-Tests the tool functions directly (not the MCP transport layer).
+Tests the implementation functions directly (not the MCP transport layer).
+The @mcp.tool() decorators may wrap these in framework objects that aren't
+directly callable — tests import the _impl functions to stay decoupled.
 """
 
-from logdigest.mcp import predigest, detect_domain, entropy_check, _detect_domain
-
+from logdigest.mcp import _detect_domain
+from logdigest.mcp import detect_domain_impl as detect_domain
+from logdigest.mcp import entropy_check_impl as entropy_check
+from logdigest.mcp import predigest_impl as predigest
 
 # ---------------------------------------------------------------------------
 # Domain detection

@@ -1,13 +1,12 @@
-"""Tests for denoise systemd journal pre-digestion."""
+"""Tests for logdigest systemd journal pre-digestion."""
 
 from logdigest.journald import (
     classify_line,
+    find_audit_bursts,
+    find_service_restart_loops,
     predigest,
     predigest_file_streaming,
-    find_service_restart_loops,
-    find_audit_bursts,
 )
-
 
 # ---------------------------------------------------------------------------
 # Level 1: Line classification

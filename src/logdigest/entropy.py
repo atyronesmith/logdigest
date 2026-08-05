@@ -10,6 +10,19 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from typing import Literal, TypedDict
+
+
+class EntropyStats(TypedDict):
+    """Stats returned by :func:`corpus_entropy`."""
+
+    mean_line_entropy: float
+    cross_doc_repetition_rate: float
+    within_doc_redundancy: float
+    overall_redundancy: float
+    predicted_impact: Literal["high", "medium", "low", "none"]
+    recommendation: str
+    n_documents: int
 
 
 def line_entropy(text: str) -> float:
@@ -72,7 +85,7 @@ def _cross_doc_repetition(documents: list[str], threshold: float = 0.05) -> floa
     return round(shared / len(all_unique_lines), 4)
 
 
-def corpus_entropy(documents: list[str]) -> dict:
+def corpus_entropy(documents: list[str]) -> EntropyStats:
     """Compute entropy metrics across a corpus.
 
     Returns:

@@ -14,18 +14,38 @@ authors = [
 dependencies = []
 
 [project.urls]
-Repository = "https://github.com/atyronesmith/denoise"
+Repository = "https://github.com/atyronesmith/logdigest"
 
 [project.optional-dependencies]
 rag = ["numpy"]
 benchmarks = ["numpy"]
-dev = ["pytest", "jsonschema"]
+dev = ["pytest", "jsonschema", "ruff"]
+discover = ["drain3>=0.9.11", "click>=8.1"]
 mcp = [
     "fastmcp>=3.2.3",
 ]
 
 [project.scripts]
+logdigest = "logdigest.__main__:main"
 logdigest-mcp = "logdigest.mcp:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/logdigest"]
+
+[tool.uv]
+# drain3 pins cachetools==4.2.1, but only uses LRUCache/Cache/cachedmethod
+# which are unchanged through cachetools 7.x. fastmcp requires cachetools>=5
+# via py-key-value-aio[memory]. Override lets both extras coexist.
+override-dependencies = ["cachetools>=5.0"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["logdigest"]

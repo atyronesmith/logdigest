@@ -1,4 +1,4 @@
-"""Run all denoise benchmarks."""
+"""Run all logdigest benchmarks."""
 
 import sys
 import importlib

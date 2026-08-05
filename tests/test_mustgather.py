@@ -1,14 +1,21 @@
-"""Tests for denoise must-gather pre-digestion."""
+"""Tests for logdigest must-gather pre-digestion."""
+
+from pathlib import Path
 
 from logdigest.mustgather import (
+    analyze_log,
     classify_line,
-    predigest,
-    predigest_file_streaming,
     find_health_check_blocks,
+    find_k8s_blobs,
     find_leader_election_blocks,
     find_managed_fields_blocks,
+    predigest,
+    predigest_bundle,
+    predigest_file,
+    predigest_file_streaming,
 )
 
+FIXTURES = Path(__file__).parent / "fixtures" / "must-gather"
 
 # ---------------------------------------------------------------------------
 # Level 1: Line classification
@@ -286,3 +293,104 @@ def test_streaming_matches_inmemory(tmp_path):
     # "caches populated" is >3 lines from the error, so both strip it
     assert "caches populated" not in inmem
     assert "caches populated" not in streamed
+
+
+# ---------------------------------------------------------------------------
+# predigest_file
+# ---------------------------------------------------------------------------
+
+def test_predigest_file_small(tmp_path):
+    log = "\n".join([
+        '"GET /healthz" 200 1ms',
+        '"GET /healthz" 200 2ms',
+        "normal line",
+        "another normal line",
+        "more normal lines",
+        "still more normal lines",
+        "even more normal lines",
+        'level=error msg="crash"',
+    ])
+    path = tmp_path / "pod.log"
+    path.write_text(log)
+    result = predigest_file(path)
+    assert "healthz" not in result
+    assert "level=error" in result
+
+
+# ---------------------------------------------------------------------------
+# find_k8s_blobs
+# ---------------------------------------------------------------------------
+
+def test_find_k8s_blobs_detects():
+    blob = "x" * 300 + " 'metadata': {'name': 'foo'} 'kind': 'Pod' " + "y" * 300
+    lines = ["short line", blob, "another short"]
+    blobs = find_k8s_blobs(lines)
+    assert len(blobs) == 1
+    assert blobs[0]["line"] == 1
+
+
+def test_find_k8s_blobs_short_lines():
+    lines = ["short", "'metadata': yes but short"]
+    assert find_k8s_blobs(lines) == []
+
+
+# ---------------------------------------------------------------------------
+# analyze_log
+# ---------------------------------------------------------------------------
+
+def test_analyze_log(tmp_path):
+    lines = [
+        '"GET /healthz" 200 1ms',
+        '"GET /healthz" 200 2ms',
+        '"GET /healthz" 200 1ms',
+        '"GET /readyz" 200 1ms',
+        "successfully renewed lease kube-system/sched",
+        "successfully renewed lease kube-system/sched",
+        "successfully renewed lease kube-system/sched",
+        'level=error msg="crash"',
+    ]
+    path = tmp_path / "pod.log"
+    path.write_text("\n".join(lines))
+    stats = analyze_log(path)
+    assert stats["total_lines"] == 8
+    assert stats["health_check_blocks"] == 1
+    assert stats["health_check_lines"] == 4
+    assert stats["leader_election_blocks"] == 1
+    assert stats["leader_election_lines"] == 3
+
+
+# ---------------------------------------------------------------------------
+# predigest_bundle (fixture-based)
+# ---------------------------------------------------------------------------
+
+def test_predigest_bundle_processes_files():
+    result = predigest_bundle(FIXTURES)
+    assert "files" in result
+    assert "skipped" in result
+    assert any("pod.log" in k for k in result["files"])
+    assert any("configmap.yaml" in k for k in result["files"])
+
+
+def test_predigest_bundle_strips_noise():
+    result = predigest_bundle(FIXTURES)
+    pod_log = next(v for k, v in result["files"].items() if "pod.log" in k)
+    assert "healthz" not in pod_log
+    assert "level=error" in pod_log
+
+
+def test_predigest_bundle_collapses_managed_fields():
+    result = predigest_bundle(FIXTURES)
+    cm = next(v for k, v in result["files"].items() if "configmap.yaml" in k)
+    assert "[MANAGED FIELDS:" in cm
+    assert "fieldsV1" not in cm
+    assert "kind: ConfigMap" in cm
+
+
+def test_predigest_bundle_skips_binary():
+    result = predigest_bundle(FIXTURES)
+    assert not any("data.bin" in k for k in result["files"])
+
+
+def test_predigest_bundle_skips_empty():
+    result = predigest_bundle(FIXTURES)
+    assert not any("empty.log" in k for k in result["files"])

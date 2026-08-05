@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-import textwrap
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from logdigest.domain_base import BlockConfig, PatternSet, classify_line, collapse_blocks
+from logdigest.domain_base import BlockConfig, PatternSet, collapse_blocks
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +30,12 @@ class TestPatternSetLoad:
         assert len(ps.noise_patterns) > 0
         assert len(ps.signal_patterns) > 0
 
-    def test_missing_domain_returns_none(self):
-        ps = PatternSet.load("nonexistent_domain_xyz")
+    def test_missing_domain_raises(self):
+        with pytest.raises(FileNotFoundError):
+            PatternSet.load("nonexistent_domain_xyz")
+
+    def test_missing_domain_returns_none_when_not_required(self):
+        ps = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps is None
 
     def test_explicit_missing_version_raises(self):
@@ -50,10 +52,10 @@ class TestPatternSetLoad:
         ps2 = PatternSet.load("ansible")
         assert ps1 is ps2
 
-    def test_cache_miss_returns_none(self):
-        ps1 = PatternSet.load("nonexistent_domain_xyz")
+    def test_cache_miss_not_required(self):
+        ps1 = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps1 is None
-        ps2 = PatternSet.load("nonexistent_domain_xyz")
+        ps2 = PatternSet.load("nonexistent_domain_xyz", required=False)
         assert ps2 is None
 
     def test_clear_cache(self):
@@ -105,6 +107,7 @@ class TestSchemaValidation:
     @pytest.mark.usefixtures("_require_jsonschema")
     def test_all_domains_valid(self):
         import importlib.resources
+
         import jsonschema
 
         schema_pkg = importlib.resources.files("logdigest.schemas")
@@ -121,8 +124,9 @@ class TestSchemaValidation:
 
     @pytest.mark.usefixtures("_require_jsonschema")
     def test_schema_rejects_bad_label(self):
-        import jsonschema
         import importlib.resources
+
+        import jsonschema
 
         schema_pkg = importlib.resources.files("logdigest.schemas")
         schema = json.loads(
@@ -138,9 +142,11 @@ class TestSchemaValidation:
             jsonschema.validate(bad_data, schema)
 
     def test_warns_without_jsonschema(self):
-        with patch.dict("sys.modules", {"jsonschema": None}):
-            with patch("builtins.__import__", side_effect=ImportError):
-                pass
+        with (
+            patch.dict("sys.modules", {"jsonschema": None}),
+            patch("builtins.__import__", side_effect=ImportError),
+        ):
+            pass
 
 
 # ── Pattern count sanity ─────────────────────────────────────────────
