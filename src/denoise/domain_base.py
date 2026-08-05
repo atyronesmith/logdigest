@@ -83,6 +83,87 @@ def analyze_file(
     return stats
 
 
+def predigest_stream(
+    source,
+    noise_patterns: PatternList,
+    signal_patterns: PatternList,
+    sink,
+    error_context: int = 3,
+    max_line_len: int = 500,
+    blob_handler=None,
+) -> dict:
+    """Streaming pre-digestion for arbitrarily large files.
+
+    Reads lines from source (file object or iterable), writes to sink
+    (file object or list). Uses a bounded buffer for error context
+    instead of loading the entire file.
+
+    Args:
+        source: Iterable of lines (e.g., open file handle).
+        noise_patterns: Noise pattern list for classify_line.
+        signal_patterns: Signal pattern list for classify_line.
+        sink: Writable file object or list to append output lines.
+        error_context: Lines of context to preserve around errors.
+        max_line_len: Lines longer than this are checked for blobs.
+        blob_handler: Optional callable(line) -> str|None. If it
+            returns a string, that replaces the line. If None, long
+            lines pass through.
+
+    Returns:
+        Dict with total_lines, noise_lines, signal_lines, kept_lines.
+    """
+    write = sink.append if isinstance(sink, list) else lambda l: sink.write(l + "\n")
+
+    buffer: list[tuple[str, str]] = []  # (line, classification)
+    stats = {"total_lines": 0, "noise_lines": 0, "signal_lines": 0, "kept_lines": 0}
+
+    def _flush_buffer(up_to: int, error_at: int | None = None) -> None:
+        """Flush buffer entries, keeping context around errors."""
+        for idx, (line, cls) in enumerate(buffer[:up_to]):
+            keep = False
+            if cls.startswith("signal:"):
+                keep = True
+            elif error_at is not None and abs(idx - error_at) <= error_context:
+                keep = True
+            elif not cls.startswith("noise:"):
+                keep = True
+
+            if keep:
+                if len(line) > max_line_len and blob_handler:
+                    replacement = blob_handler(line)
+                    if replacement is not None:
+                        write(replacement)
+                        stats["kept_lines"] += 1
+                        continue
+                write(line)
+                stats["kept_lines"] += 1
+        del buffer[:up_to]
+
+    window = error_context * 2 + 1
+
+    for raw_line in source:
+        line = raw_line.rstrip("\n").rstrip("\r")
+        stats["total_lines"] += 1
+        cls = classify_line(line, noise_patterns, signal_patterns)
+
+        if cls.startswith("noise:"):
+            stats["noise_lines"] += 1
+        elif cls.startswith("signal:"):
+            stats["signal_lines"] += 1
+
+        buffer.append((line, cls))
+
+        if cls.startswith("signal:"):
+            _flush_buffer(len(buffer), error_at=len(buffer) - 1)
+        elif len(buffer) > window * 2:
+            _flush_buffer(len(buffer) - window)
+
+    if buffer:
+        _flush_buffer(len(buffer))
+
+    return stats
+
+
 def find_large_blobs(
     lines: list[str],
     min_chars: int = 500,

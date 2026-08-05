@@ -18,6 +18,7 @@ from pathlib import Path
 from denoise.domain_base import (
     classify_line as _classify_line,
     analyze_file as _analyze_file,
+    predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
@@ -279,9 +280,31 @@ def predigest(text: str, keep_timestamps: bool = False) -> str:
 
 
 def predigest_file(filepath: Path) -> str:
-    """Pre-digest a single journal export file."""
+    """Pre-digest a single journal export file.
+
+    For small files, loads into memory. For large files (>50MB),
+    uses streaming to avoid OOM.
+    """
+    size = filepath.stat().st_size
+    if size > 50 * 1024 * 1024:
+        return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
+
+
+def predigest_file_streaming(filepath: Path) -> str:
+    """Pre-digest a journal file using streaming."""
+    output: list[str] = []
+    with open(filepath, errors="replace") as f:
+        predigest_stream(
+            source=f,
+            noise_patterns=NOISE_PATTERNS,
+            signal_patterns=SIGNAL_PATTERNS,
+            sink=output,
+            error_context=5,
+            max_line_len=500,
+        )
+    return "\n".join(output)
 
 
 def analyze_log(filepath: Path) -> dict:

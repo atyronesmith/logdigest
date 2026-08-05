@@ -1,6 +1,6 @@
 """Tests for denoise Ansible log pre-digestion."""
 
-from denoise.ansible import classify_line, predigest
+from denoise.ansible import classify_line, predigest, predigest_file_streaming
 
 
 def test_classify_noise():
@@ -49,3 +49,70 @@ def test_predigest_collapses_item_loops():
     log = "\n".join(lines)
     result = predigest(log)
     assert "[ok: 10 items processed]" in result
+
+
+# ---------------------------------------------------------------------------
+# Streaming pre-digestion
+# ---------------------------------------------------------------------------
+
+def test_streaming_strips_noise(tmp_path):
+    log = "\n".join([
+        "ok: [host1]",
+        "skipping: [host2]",
+        "changed: [host3]",
+        "some normal log line",
+        "another normal log line",
+        "another normal log line",
+        "another normal log line",
+        "another normal log line",
+        "another normal log line",
+        'fatal: [host1]: FAILED! => {"msg": "something broke"}',
+        "ok: [host4]",
+    ])
+    path = tmp_path / "ansible.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "ok: [host1]" not in result
+    assert "skipping:" not in result
+    assert "fatal:" in result
+
+
+def test_streaming_preserves_error_context(tmp_path):
+    log = "\n".join([
+        "normal line 1",
+        "normal line 2",
+        "normal line 3",
+        'fatal: [host1]: FAILED! => {"msg": "crash"}',
+        "normal line 4",
+    ])
+    path = tmp_path / "ansible.log"
+    path.write_text(log)
+    result = predigest_file_streaming(path)
+    assert "fatal:" in result
+    assert "normal line 3" in result
+
+
+def test_streaming_matches_inmemory(tmp_path):
+    log = "\n".join([
+        "ok: [host1]",
+        "some normal log",
+        "another normal log",
+        "more logs here",
+        "yet more logs",
+        "still more logs",
+        "even more logs",
+        "and more logs",
+        "and still more",
+        'fatal: [host1]: FAILED! => {"msg": "broke"}',
+        "final line",
+    ])
+    path = tmp_path / "ansible.log"
+    path.write_text(log)
+
+    inmem = predigest(log)
+    streamed = predigest_file_streaming(path)
+
+    assert "fatal:" in inmem
+    assert "fatal:" in streamed
+    assert "ok: [host1]" not in inmem
+    assert "ok: [host1]" not in streamed

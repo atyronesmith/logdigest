@@ -19,6 +19,7 @@ from denoise.domain_base import (
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
+    predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
@@ -280,10 +281,50 @@ def predigest(text: str) -> str:
     return "\n".join(output)
 
 
+def _blob_handler(line: str) -> str | None:
+    """Replace large K8s API response lines with summaries."""
+    if not any(m in line for m in K8S_BLOB_MARKERS):
+        return None
+    kind_m = re.search(r"['\"]kind['\"]: ['\"](\w+)['\"]", line)
+    name_m = re.search(r"['\"]name['\"]: ['\"]([\\w-]+)['\"]", line)
+    ns_m = re.search(r"['\"]namespace['\"]: ['\"]([\\w-]+)['\"]", line)
+    kind = kind_m.group(1) if kind_m else "resource"
+    name = name_m.group(1) if name_m else "?"
+    ns = ns_m.group(1) if ns_m else "?"
+    return f"[K8S API RESPONSE: {kind}/{name} in {ns} -- full response omitted]"
+
+
 def predigest_file(filepath: Path) -> str:
-    """Pre-digest a single must-gather log file."""
+    """Pre-digest a single must-gather log file.
+
+    For small files, loads into memory. For large files (>50MB),
+    uses streaming to avoid OOM.
+    """
+    size = filepath.stat().st_size
+    if size > 50 * 1024 * 1024:
+        return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
+
+
+def predigest_file_streaming(filepath: Path) -> str:
+    """Pre-digest a must-gather log file using streaming.
+
+    Reads line-by-line to handle arbitrarily large files (multi-GB
+    etcd logs, etc.) without loading the entire file into memory.
+    """
+    output: list[str] = []
+    with open(filepath, errors="replace") as f:
+        predigest_stream(
+            source=f,
+            noise_patterns=NOISE_PATTERNS,
+            signal_patterns=SIGNAL_PATTERNS,
+            sink=output,
+            error_context=3,
+            max_line_len=500,
+            blob_handler=_blob_handler,
+        )
+    return "\n".join(output)
 
 
 def predigest_bundle(bundle_dir: Path) -> dict[str, str]:
@@ -291,23 +332,25 @@ def predigest_bundle(bundle_dir: Path) -> dict[str, str]:
 
     Walks the directory, applies per-file pre-digestion to text files,
     and returns a dict of {relative_path: compressed_text}.
+
+    Uses streaming for files >50MB to avoid OOM on large pod logs.
     """
     results = {}
     for filepath in sorted(bundle_dir.rglob("*")):
         if not filepath.is_file():
             continue
-        # Skip binary files and common non-text extensions
         if filepath.suffix in (".gz", ".tar", ".zip", ".png", ".jpg", ".bin"):
             continue
         try:
-            text = filepath.read_text(errors="replace")
+            size = filepath.stat().st_size
+            if size == 0:
+                continue
+            result = predigest_file(filepath)
+            if result.strip():
+                rel = str(filepath.relative_to(bundle_dir))
+                results[rel] = result
         except (OSError, UnicodeDecodeError):
             continue
-        if not text.strip():
-            continue
-
-        rel = str(filepath.relative_to(bundle_dir))
-        results[rel] = predigest(text)
 
     return results
 

@@ -17,6 +17,7 @@ from denoise.domain_base import (
     classify_line as _classify_line,
     analyze_file as _analyze_file,
     find_large_blobs,
+    predigest_stream,
 )
 
 # ---------------------------------------------------------------------------
@@ -237,10 +238,55 @@ def predigest(text: str) -> str:
     return "\n".join(output)
 
 
+ANSIBLE_BLOB_MARKERS = [
+    "'metadata':",
+    '"metadata":',
+    "'spec':",
+    '"spec":',
+    "fieldsV1",
+]
+
+
+def _blob_handler(line: str) -> str | None:
+    """Replace large K8s API response lines with summaries."""
+    if not any(m in line for m in ANSIBLE_BLOB_MARKERS):
+        return None
+    m = re.search(r"'kind': '(\w+)'", line) or re.search(r'"kind": "(\w+)"', line)
+    kind = m.group(1) if m else "resource"
+    m = re.search(r"'name': '([\w-]+)'", line) or re.search(r'"name": "([\w-]+)"', line)
+    name = m.group(1) if m else "?"
+    m = re.search(r"'namespace': '([\w-]+)'", line) or re.search(r'"namespace": "([\w-]+)"', line)
+    ns = m.group(1) if m else "?"
+    return f"[K8S API RESPONSE: {kind}/{name} in {ns} — full response omitted]"
+
+
 def predigest_file(filepath: Path) -> str:
-    """Pre-digest a single Ansible log file."""
+    """Pre-digest a single Ansible log file.
+
+    For small files, loads into memory. For large files (>50MB),
+    uses streaming to avoid OOM.
+    """
+    size = filepath.stat().st_size
+    if size > 50 * 1024 * 1024:
+        return predigest_file_streaming(filepath)
     text = filepath.read_text(errors="replace")
     return predigest(text)
+
+
+def predigest_file_streaming(filepath: Path) -> str:
+    """Pre-digest an Ansible log file using streaming."""
+    output: list[str] = []
+    with open(filepath, errors="replace") as f:
+        predigest_stream(
+            source=f,
+            noise_patterns=NOISE_PATTERNS,
+            signal_patterns=SIGNAL_PATTERNS,
+            sink=output,
+            error_context=5,
+            max_line_len=500,
+            blob_handler=_blob_handler,
+        )
+    return "\n".join(output)
 
 
 def analyze_log(filepath: Path) -> dict:
