@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>denoise — Pre-digestion for LLM Pipelines</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+  }
+
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 60px 24px;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    color: #58a6ff;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  h1 span { color: #7ee787; }
+
+  .tagline {
+    color: #8b949e;
+    font-size: 1.15rem;
+    margin-bottom: 40px;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    color: #e6edf3;
+    margin: 32px 0 12px;
+    border-bottom: 1px solid #21262d;
+    padding-bottom: 6px;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+  }
+  ul li {
+    padding: 6px 0;
+    padding-left: 20px;
+    position: relative;
+  }
+  ul li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: #7ee787;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #58a6ff; }
+  .card h3 {
+    font-size: 1rem;
+    color: #e6edf3;
+    margin-bottom: 6px;
+  }
+  .card p {
+    font-size: 0.9rem;
+    color: #8b949e;
+    margin-bottom: 10px;
+  }
+
+  .stat {
+    display: inline-block;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    color: #7ee787;
+    font-weight: 600;
+  }
+
+  .hero-links {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+  }
+  .hero-links a {
+    display: inline-block;
+    padding: 12px 28px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1.05rem;
+    transition: opacity 0.2s;
+  }
+  .hero-links a:hover { opacity: 0.85; text-decoration: none; }
+  .demo-btn {
+    background: #238636;
+    color: #fff;
+    font-size: 1.1rem;
+  }
+  .gh-btn {
+    background: #21262d;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+  }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid #21262d;
+    color: #484f58;
+    font-size: 0.85rem;
+  }
+
+  @media (max-width: 520px) {
+    .cards { grid-template-columns: 1fr; }
+    h1 { font-size: 1.8rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>de<span>noise</span></h1>
+  <p class="tagline">Task-aware pre-digestion for RAG and LLM pipelines. Strip the noise before it costs you tokens.</p>
+
+  <div class="hero-links">
+    <a class="demo-btn" href="demo/">Try the Interactive Demo</a>
+    <a class="gh-btn" href="https://github.com/atyronesmith/denoise">GitHub Repository</a>
+  </div>
+
+  <h2>What it does</h2>
+  <ul>
+    <li>Removes boilerplate, duplicates, and low-entropy content from document corpora</li>
+    <li>Domain-specific modules for Ansible, OpenShift must-gather, CI/CD, and systemd logs</li>
+    <li>Entropy pre-flight to predict impact before you build anything</li>
+    <li>Safety guard optimization — tiered classification eliminates most LLM guard calls</li>
+    <li>Zero runtime dependencies — pure Python 3.11+</li>
+  </ul>
+
+  <h2>Results</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>Token Savings</h3>
+      <p>Validated across Ansible, must-gather, and CI/CD corpora</p>
+      <span class="stat">83% reduction</span>
+    </div>
+    <div class="card">
+      <h3>Guard Calls Eliminated</h3>
+      <p>Tiered classifier skips LLM safety checks on safe content</p>
+      <span class="stat">84% fewer calls</span>
+    </div>
+    <div class="card">
+      <h3>Quality Impact</h3>
+      <p>Pre-digestion improves downstream LLM output quality</p>
+      <span class="stat">+3% functional score</span>
+    </div>
+    <div class="card">
+      <h3>Dependencies</h3>
+      <p>Pure Python, no external libraries required at runtime</p>
+      <span class="stat">0</span>
+    </div>
+  </div>
+
+  <h2>Documentation</h2>
+  <ul>
+    <li><a href="PREDIGESTION.html">Pre-digestion theory and results</a> — entropy bounds, 83% token savings</li>
+    <li><a href="GUARD.html">Guard module</a> — tiered classification, training weights</li>
+    <li><a href="CONTINUOUS_CALIBRATION.html">Continuous calibration</a> — runtime drift detection</li>
+  </ul>
+
+  <footer>
+    Apache 2.0 &middot; Built with Python &middot; No JavaScript frameworks were harmed
+  </footer>
+</div>
+</body>
+</html>
